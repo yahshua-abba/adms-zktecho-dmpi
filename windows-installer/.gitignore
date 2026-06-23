@@ -1,0 +1,5 @@
+# Build artifacts - assembled at build time, never committed
+build/
+Output/
+*.exe
+payload/config/httpd-adms.active.conf
