@@ -107,7 +107,8 @@ jobs:
           foreach ($e in 'pdo_sqlite','sqlite3','mbstring','openssl','fileinfo','curl','zip','gd') {
             $ini = $ini -replace ('(?m)^;\s*extension\s*=\s*' + [regex]::Escape($e) + '\s*$'), ("extension=$e")
           }
-          Set-Content -NoNewline "$dir/php.ini" $ini
+          $abs = (Resolve-Path $dir).Path
+          [System.IO.File]::WriteAllText((Join-Path $abs 'php.ini'), $ini)
 
       - name: Fetch portable Apache (2.4, VS17)
         run: |
