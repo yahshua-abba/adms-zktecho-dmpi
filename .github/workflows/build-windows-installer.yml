@@ -110,15 +110,19 @@ jobs:
           $abs = (Resolve-Path $dir).Path
           [System.IO.File]::WriteAllText((Join-Path $abs 'php.ini'), $ini)
 
-      - name: Fetch portable Apache (2.4, Win64)
+      - name: Fetch portable Apache (2.4, VS17 to match PHP)
         run: |
+          # PHP 8.4 Windows ships as VS17, so pull the VS17 Apache build to keep
+          # the VC++ toolset identical (avoids httpd failing to load the PHP
+          # module). The latest Apache Lounge page lists VS18; the VS17 builds
+          # live under /download/VS17/ and are still maintained.
           $url = "${{ github.event.inputs.apache_url }}"
           $headers = @{ "User-Agent" = "Mozilla/5.0"; "Referer" = "https://www.apachelounge.com/download/" }
           if (-not $url) {
-            Write-Host "Auto-detecting latest Apache Lounge Win64 build..."
-            $page = Invoke-WebRequest "https://www.apachelounge.com/download/" -UseBasicParsing -Headers $headers
-            $m = [regex]::Match($page.Content, 'href="(/download/VS\d+/binaries/httpd-2\.4\.\d+-\d+-[Ww]in64-VS\d+\.zip)"')
-            if (-not $m.Success) { throw "Could not find an Apache Win64 zip link; pass apache_url manually." }
+            Write-Host "Auto-detecting latest Apache Lounge VS17 build..."
+            $page = Invoke-WebRequest "https://www.apachelounge.com/download/VS17/" -UseBasicParsing -Headers $headers
+            $m = [regex]::Match($page.Content, 'href="(/download/VS17/binaries/httpd-2\.4\.\d+-\d+-[Ww]in64-VS17\.zip)"')
+            if (-not $m.Success) { throw "Could not find an Apache VS17 zip link; pass apache_url manually." }
             $url = "https://www.apachelounge.com" + $m.Groups[1].Value
           }
           Write-Host "Downloading Apache from $url"
