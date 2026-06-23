@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Contracts\PayrollClient;
+use App\Sync\HttpPayrollClient;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Pagination\Paginator; 
+use Illuminate\Pagination\Paginator;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -12,7 +14,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(PayrollClient::class, function ($app) {
+            $config = $app['config']['payroll'];
+
+            return new HttpPayrollClient(
+                baseUrl: $config['base_url'],
+                username: $config['username'],
+                password: $config['password'],
+                userAgent: $config['user_agent'],
+                timeout: $config['timeout'],
+            );
+        });
     }
 
     /**

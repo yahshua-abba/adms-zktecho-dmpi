@@ -59,7 +59,11 @@ return [
             'strict' => true,
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
-                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                // PDO::MYSQL_ATTR_SSL_CA was deprecated in PHP 8.5 in favour of
+                // Pdo\Mysql::ATTR_SSL_CA; pick the right one per runtime so this
+                // stays clean on both PHP 8.1 and 8.5 (the unused branch is not
+                // evaluated, so referencing the 8.4+ constant is safe on 8.1).
+                (PHP_VERSION_ID >= 80400 ? Pdo\Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
         ],
 

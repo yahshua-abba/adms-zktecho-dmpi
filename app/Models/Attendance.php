@@ -10,6 +10,9 @@ class Attendance extends Model
     use HasFactory;
 
     protected $fillable = [
+        'sn',
+        'table',
+        'stamp',
         'employee_id',
         'timestamp',
         'status1',
@@ -17,6 +20,11 @@ class Attendance extends Model
         'status3',
         'status4',
         'status5',
+        'log_type',
+        'is_sync',
+        'sync_id',
+        'sync_time',
+        'sync_error',
     ];
 
     protected $casts = [
@@ -26,5 +34,7 @@ class Attendance extends Model
         'status3' => 'boolean',
         'status4' => 'boolean',
         'status5' => 'boolean',
+        'is_sync' => 'boolean',
+        'sync_time' => 'datetime',
     ];
 }

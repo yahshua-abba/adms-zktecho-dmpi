@@ -70,7 +70,9 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Matches the device clocks and the DMPI payroll app (both Asia/Manila),
+    // so "today" and timestamp comparisons line up across the ecosystem.
+    'timezone' => 'Asia/Manila',
 
     /*
     |--------------------------------------------------------------------------
