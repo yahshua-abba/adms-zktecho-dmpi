@@ -11,7 +11,7 @@ on:
     inputs:
       php_minor:
         description: "PHP minor series (must exist in php.net releases.json)"
-        default: "8.3"
+        default: "8.4"
         required: true
       apache_url:
         description: "Optional Apache Lounge VS17 zip URL (blank = auto-detect latest)"
@@ -40,7 +40,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ github.event.inputs.php_minor || '8.3' }}
+          php-version: ${{ github.event.inputs.php_minor || '8.4' }}
           extensions: mbstring, sqlite3, pdo_sqlite, gd, zip, curl, fileinfo, openssl
           tools: composer
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Fetch portable PHP (Thread Safe, x64)
         run: |
-          $minor = "${{ github.event.inputs.php_minor || '8.3' }}"
+          $minor = "${{ github.event.inputs.php_minor || '8.4' }}"
           $releases = Invoke-RestMethod "https://windows.php.net/downloads/releases/releases.json"
           $entry = $releases.$minor
           if (-not $entry) { throw "PHP $minor not found in releases.json" }
