@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Sync\HttpPayrollClient;
 use App\Sync\PunchLog;
 use Illuminate\Support\Facades\Http;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class HttpPayrollClientTest extends TestCase
@@ -49,6 +50,26 @@ class HttpPayrollClientTest extends TestCase
                 && $request['log_list'][0]['log_type'] === 'in'
                 && $request['log_list'][0]['sync_id'] === 'DEV-IN-1';
         });
+    }
+
+    public function test_missing_payroll_url_fails_with_actionable_message(): void
+    {
+        $client = new HttpPayrollClient('', 'svc@dmpi', 'secret');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('PAYROLL_URL is missing');
+
+        $client->fetchEmployees();
+    }
+
+    public function test_payroll_url_must_include_scheme(): void
+    {
+        $client = new HttpPayrollClient('payroll.test', 'svc@dmpi', 'secret');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('PAYROLL_URL must include http:// or https://.');
+
+        $client->fetchEmployees();
     }
 
     public function test_fetch_employees_maps_company_and_chapa_and_skips_rows_without_chapa(): void
