@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Health\SchedulerControl;
 use App\Health\SystemHealth;
 use App\Models\ActivityLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,6 +47,19 @@ class HealthCheckTest extends TestCase
         $this->assertSame('warn', $this->check('roster')['status']);
     }
 
+    public function test_payroll_config_warns_when_url_has_no_scheme(): void
+    {
+        config([
+            'payroll.base_url' => 'delmontepayroll.com',
+            'payroll.username' => 'svc',
+            'payroll.password' => 'secret',
+        ]);
+
+        $this->assertSame('warn', $this->check('payroll_config')['status']);
+        $this->assertSame('PAYROLL_URL must include http:// or https://.', $this->check('payroll_config')['detail']);
+        $this->assertSame('warn', $this->check('dmpi')['status']);
+    }
+
     public function test_data_backed_checks_link_to_their_data(): void
     {
         $this->assertSame(route('devices.Attendance', ['sync' => 'pending']), $this->check('sync_backlog')['link']);
@@ -66,7 +80,7 @@ class HealthCheckTest extends TestCase
 
     public function test_start_scheduler_launches_it_when_stopped(): void
     {
-        $fake = new class extends \App\Health\SchedulerControl
+        $fake = new class extends SchedulerControl
         {
             public bool $started = false;
 
@@ -80,7 +94,7 @@ class HealthCheckTest extends TestCase
                 $this->started = true;
             }
         };
-        $this->app->instance(\App\Health\SchedulerControl::class, $fake);
+        $this->app->instance(SchedulerControl::class, $fake);
 
         $this->post(route('scheduler.start'))->assertRedirect(route('monitoring'));
 
@@ -90,7 +104,7 @@ class HealthCheckTest extends TestCase
 
     public function test_start_scheduler_is_a_noop_when_already_running(): void
     {
-        $fake = new class extends \App\Health\SchedulerControl
+        $fake = new class extends SchedulerControl
         {
             public bool $started = false;
 
@@ -104,7 +118,7 @@ class HealthCheckTest extends TestCase
                 $this->started = true;
             }
         };
-        $this->app->instance(\App\Health\SchedulerControl::class, $fake);
+        $this->app->instance(SchedulerControl::class, $fake);
 
         $this->post(route('scheduler.start'))->assertRedirect(route('monitoring'));
 

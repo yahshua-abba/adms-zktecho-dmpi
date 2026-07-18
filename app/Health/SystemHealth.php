@@ -77,7 +77,12 @@ class SystemHealth
 
     private static function payrollConfig(): array
     {
-        $set = config('payroll.base_url') && config('payroll.username') && config('payroll.password');
+        $urlError = self::payrollBaseUrlError(config('payroll.base_url'));
+        if ($urlError !== null) {
+            return self::check('payroll_config', 'Payroll credentials', 'warn', $urlError, route('help'));
+        }
+
+        $set = config('payroll.username') && config('payroll.password');
 
         return $set
             ? self::check('payroll_config', 'Payroll credentials', 'ok', 'Configured.', route('help'))
@@ -86,9 +91,10 @@ class SystemHealth
 
     private static function dmpiReachable(): array
     {
-        $url = config('payroll.base_url');
-        if (! $url) {
-            return self::check('dmpi', 'DMPI reachable', 'warn', 'No PAYROLL_URL set.', route('help'));
+        $url = trim((string) config('payroll.base_url'));
+        $urlError = self::payrollBaseUrlError($url);
+        if ($urlError !== null) {
+            return self::check('dmpi', 'DMPI reachable', 'warn', $urlError, route('help'));
         }
 
         try {
@@ -98,6 +104,26 @@ class SystemHealth
         } catch (\Throwable $e) {
             return self::check('dmpi', 'DMPI reachable', 'fail', 'Unreachable: '.$e->getMessage());
         }
+    }
+
+    private static function payrollBaseUrlError(?string $url): ?string
+    {
+        $url = trim((string) $url);
+
+        if ($url === '') {
+            return 'No PAYROLL_URL set.';
+        }
+
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return 'PAYROLL_URL must include http:// or https://.';
+        }
+
+        if (! parse_url($url, PHP_URL_HOST)) {
+            return 'PAYROLL_URL must be a full DMPI URL.';
+        }
+
+        return null;
     }
 
     private static function syncBacklog(): array

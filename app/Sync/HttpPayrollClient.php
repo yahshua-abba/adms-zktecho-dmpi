@@ -5,6 +5,7 @@ namespace App\Sync;
 use App\Contracts\PayrollClient;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use InvalidArgumentException;
 
 /**
  * The production PayrollClient — talks to the live DMPI payroll app.
@@ -25,8 +26,7 @@ class HttpPayrollClient implements PayrollClient
         private string $password,
         private string $userAgent = 'YP_TIMEKEEPER',
         private int $timeout = 600,
-    ) {
-    }
+    ) {}
 
     public function pushLogs(array $logs): PushResult
     {
@@ -45,6 +45,7 @@ class HttpPayrollClient implements PayrollClient
             $code = $rejected['error_code'] ?? null;
             if ($code === 1) {
                 $synced[] = $rejected['id']; // accepted duplicate
+
                 continue;
             }
             $failures[] = [
@@ -167,6 +168,26 @@ class HttpPayrollClient implements PayrollClient
 
     private function url(string $path): string
     {
-        return rtrim($this->baseUrl, '/').'/'.$path;
+        return rtrim($this->validatedBaseUrl(), '/').'/'.$path;
+    }
+
+    private function validatedBaseUrl(): string
+    {
+        $url = trim($this->baseUrl);
+
+        if ($url === '') {
+            throw new InvalidArgumentException('PAYROLL_URL is missing. Set it to the full DMPI URL, for example https://delmontepayroll.com.');
+        }
+
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            throw new InvalidArgumentException('PAYROLL_URL must include http:// or https://.');
+        }
+
+        if (! parse_url($url, PHP_URL_HOST)) {
+            throw new InvalidArgumentException('PAYROLL_URL must be a full DMPI URL, for example https://delmontepayroll.com.');
+        }
+
+        return $url;
     }
 }
