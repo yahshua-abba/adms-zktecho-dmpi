@@ -76,6 +76,34 @@ Before you begin, ensure you have the following installed on your system:
 
 You can monitor the status of devices by querying the `devices` table where the `online` field indicates the last time the device was online.
 
+## Updating an Existing Sail Installation
+
+From the project root, run:
+
+```bash
+./scripts/update.sh
+```
+
+The script pulls fast-forward repository changes, installs PHP dependencies, rebuilds and restarts Sail, runs migrations, clears Laravel caches, rebuilds frontend assets when their package files changed, starts the scheduler, and prints the final container and migration status. It does not modify `.env` or delete the database volume. It stops before pulling if tracked local changes are present.
+
+To restart the application after changing `.env` values or restarting Docker containers, run:
+
+```bash
+./scripts/restart.sh
+```
+
+For Composer, npm, Dockerfile, or repository updates, use `./scripts/update.sh` so dependencies and migrations are also handled.
+
+## Installing From a Fresh Checkout
+
+After Docker is installed, run this from the project root:
+
+```bash
+./scripts/install.sh
+```
+
+The script creates `.env` only when it does not already exist, installs dependencies, builds the frontend, starts Sail, generates the Laravel key, runs migrations, starts the scheduler, and checks the installation. It never overwrites an existing `.env` or deletes the database volume. Payroll credentials still need to be entered in `.env` before the initial payroll sync.
+
 ## Postman Collection
 
 For testing and interacting with the API endpoints, you can use the provided Postman collection:
