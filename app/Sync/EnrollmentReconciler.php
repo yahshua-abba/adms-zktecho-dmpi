@@ -7,6 +7,7 @@ use App\Models\DeviceAssignment;
 use App\Models\DeviceCommand;
 use App\Models\DeviceEnrollment;
 use App\Models\EmployeeMap;
+use Illuminate\Support\Collection;
 
 /**
  * Keeps each device's user list in step with its DMPI assignments by queuing
@@ -58,7 +59,7 @@ class EnrollmentReconciler
         }
     }
 
-    /** @return \Illuminate\Support\Collection<string, array{pin:string,name:?string,card:?string}> */
+    /** @return Collection<string, array{pin:string,name:?string,card:?string}> */
     private function desiredUsers(string $payrollDeviceCode)
     {
         $assignedIds = DeviceAssignment::where('device_code', $payrollDeviceCode)->pluck('payroll_employee_id');
@@ -75,7 +76,7 @@ class EnrollmentReconciler
 
     private function updateCommand(array $user): string
     {
-        return "DATA UPDATE USERINFO PIN={$user['pin']}\tName={$user['name']}\tPrivilege=0\tCard={$user['card']}";
+        return "DATA UPDATE USERINFO PIN={$user['pin']}\tName={$user['name']}\tPri=0\tCard={$user['card']}";
     }
 
     private function queue(string $deviceSn, string $body): void

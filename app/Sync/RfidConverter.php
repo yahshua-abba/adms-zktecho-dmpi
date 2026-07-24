@@ -5,10 +5,10 @@ namespace App\Sync;
 /**
  * Produces the Card value to push to a device's USERINFO from the DMPI RFID.
  *
- * Per requirement, the RFID is pushed EXACTLY as stored in DMPI — no hex/decimal
- * transformation. (The device is expected to read the card in the same format
- * DMPI holds it.) This is kept as a single seam so any future per-device
- * formatting has one home.
+ * ZKTeco's push protocol accepts a four-byte RFID in the raw hexadecimal form
+ * `Card=[AABBCCDD]`. DMPI stores those same card bytes with colon separators
+ * (`AA:BB:CC:DD`), so this converter removes the separators and adds brackets.
+ * Numeric card values remain strings because the protocol supports those too.
  */
 class RfidConverter
 {
@@ -16,6 +16,14 @@ class RfidConverter
     {
         $rfid = trim((string) $rfid);
 
-        return $rfid === '' ? null : $rfid;
+        if ($rfid === '') {
+            return null;
+        }
+
+        if (preg_match('/^(?:[0-9a-f]{2}:){3}[0-9a-f]{2}$/i', $rfid)) {
+            return '['.strtoupper(str_replace(':', '', $rfid)).']';
+        }
+
+        return $rfid;
     }
 }
