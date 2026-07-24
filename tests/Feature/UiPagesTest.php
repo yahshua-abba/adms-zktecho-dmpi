@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Attendance;
 use App\Models\Device;
+use App\Models\DeviceUser;
 use App\Models\EmployeeMap;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -46,6 +47,8 @@ class UiPagesTest extends TestCase
     public function test_employees_page_lists_mapped_and_unmapped(): void
     {
         EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'ABABA, Rubelyn', 'rfid' => '1996052557']);
+        Device::create(['no_sn' => 'DEV-IN', 'nama' => 'Main entrance']);
+        DeviceUser::create(['device_sn' => 'DEV-IN', 'pin' => '5_9999', 'name' => 'Unknown device user', 'card' => '1996052557']);
         Attendance::create([
             'sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1',
             'employee_id' => '5_9999', 'timestamp' => now(), 'is_sync' => false,
@@ -58,6 +61,12 @@ class UiPagesTest extends TestCase
         $response->assertSee('RFID Card');
         $response->assertSee('1996052557'); // RFID shown for mapped employee
         $response->assertSee('5_9999'); // unmapped PIN surfaced
+        $response->assertSee('DEV-IN');
+        $response->assertSee('Main entrance');
+        $response->assertSee('Source device(s)');
+        $response->assertSee('Device user / card');
+        $response->assertSee('Unknown device user');
+        $response->assertSee('Look up device user');
     }
 
     public function test_employees_search_filters_the_roster(): void

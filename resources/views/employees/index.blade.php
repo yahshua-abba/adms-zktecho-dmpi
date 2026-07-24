@@ -107,21 +107,68 @@
                         <i class="bi bi-exclamation-triangle"></i>
                         These PINs are tapping on devices but aren't matched to any employee yet, so their punches <strong>won't sync to payroll</strong>. Fix by enrolling each device user with PIN = <code>{company}_{CHAPA}</code>, or by syncing the roster from DMPI.
                     </div>
+                    <div class="alert alert-info small mb-3">
+                        <i class="bi bi-info-circle"></i>
+                        Click <strong>Look up device user</strong> to ask each source reader for the name and RFID/card assigned to that PIN. The lookup is delivered when the device checks in; refresh this page afterward.
+                    </div>
                 @endif
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
                         <thead>
-                            <tr><th>Device PIN</th><th>Punches</th><th>Last seen</th></tr>
+                            <tr><th>Device PIN</th><th>Source device(s)</th><th>Device user / card</th><th>Punches</th><th>Last seen</th><th>Action</th></tr>
                         </thead>
                         <tbody>
                             @forelse ($unmapped as $u)
                                 <tr>
                                     <td><span class="badge bg-warning text-dark">{{ $u->employee_id }}</span></td>
+                                    <td>
+                                        @forelse ($u->source_devices as $source)
+                                            <span class="badge bg-light text-dark border">
+                                                <i class="bi bi-hdd-network"></i>
+                                                <code>{{ $source['serial'] }}</code>
+                                                @if ($source['name'])
+                                                    <span class="text-muted">— {{ $source['name'] }}</span>
+                                                @endif
+                                            </span>
+                                        @empty
+                                            <span class="text-muted">—</span>
+                                        @endforelse
+                                    </td>
+                                    <td>
+                                        @foreach ($u->device_users as $user)
+                                            <div class="small mb-1">
+                                                <div><code>{{ $user['serial'] }}</code></div>
+                                                @if ($user['user_name'])
+                                                    <strong>{{ $user['user_name'] }}</strong>
+                                                @else
+                                                    <span class="text-muted">Not looked up yet</span>
+                                                @endif
+                                                @if ($user['card'])
+                                                    <div><code>RFID/card: {{ $user['card'] }}</code></div>
+                                                @endif
+                                            </div>
+                                        @endforeach
+                                        @if (count($u->known_cards))
+                                            <div class="small text-muted">Previously known card(s):
+                                                @foreach ($u->known_cards as $card)
+                                                    <code>{{ $card }}</code>@if (! $loop->last), @endif
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    </td>
                                     <td>{{ $u->punch_count }}</td>
                                     <td>{{ $u->last_punch_at }}</td>
+                                    <td>
+                                        <form method="POST" action="{{ route('employees.unmapped.lookup', ['pin' => $u->employee_id]) }}">
+                                            @csrf
+                                            <button type="submit" class="btn btn-sm btn-outline-primary" title="Ask the source device(s) for this user's name and card">
+                                                <i class="bi bi-search"></i> Look up device user
+                                            </button>
+                                        </form>
+                                    </td>
                                 </tr>
                             @empty
-                                <tr><td colspan="3" class="text-muted text-center py-3">No unmapped PINs — every tapping device user is matched to an employee. 🎉</td></tr>
+                                <tr><td colspan="6" class="text-muted text-center py-3">No unmapped PINs — every tapping device user is matched to an employee. 🎉</td></tr>
                             @endforelse
                         </tbody>
                     </table>

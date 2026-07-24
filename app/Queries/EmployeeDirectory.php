@@ -5,6 +5,8 @@ namespace App\Queries;
 use App\Models\Attendance;
 use App\Models\Device;
 use App\Models\DeviceAssignment;
+use App\Models\DeviceEnrollment;
+use App\Models\DeviceUser;
 use App\Models\EmployeeMap;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -99,14 +101,73 @@ class EmployeeDirectory
         return $employees;
     }
 
-    /** Device PINs seen in attendances that have no employee_map row. */
+    /**
+     * Device PINs seen in attendances that have no employee_map row.
+     *
+     * The push protocol sends the PIN, not the RFID/card number. We can still
+     * provide useful investigation context from the punch source and any
+     * enrollment state previously recorded by ADMS.
+     */
     public static function unmappedPins(): Collection
     {
-        return Attendance::query()
+        $unmapped = Attendance::query()
             ->whereNotIn('employee_id', EmployeeMap::pluck('device_pin'))
             ->selectRaw('employee_id, count(*) as punch_count, max(timestamp) as last_punch_at')
             ->groupBy('employee_id')
             ->orderByRaw('max(timestamp) desc')
             ->get();
+
+        if ($unmapped->isEmpty()) {
+            return $unmapped;
+        }
+
+        $pins = $unmapped->pluck('employee_id');
+        $allSerials = Attendance::query()
+            ->whereIn('employee_id', $pins)
+            ->select('employee_id', 'sn')
+            ->distinct()
+            ->get()
+            ->groupBy('employee_id')
+            ->map(fn ($rows) => $rows->pluck('sn')->values());
+
+        $devices = Device::whereIn('no_sn', $allSerials->flatten()->unique())
+            ->get(['no_sn', 'nama'])
+            ->keyBy('no_sn');
+
+        $deviceUsers = DeviceUser::query()
+            ->whereIn('pin', $pins)
+            ->whereIn('device_sn', $allSerials->flatten()->unique())
+            ->get()
+            ->keyBy(fn ($user) => $user->device_sn.'|'.$user->pin);
+
+        $cardsByPin = DeviceEnrollment::query()
+            ->whereIn('pin', $pins)
+            ->whereNotNull('card')
+            ->where('card', '<>', '')
+            ->get(['pin', 'card'])
+            ->groupBy('pin')
+            ->map(fn ($rows) => $rows->pluck('card')->unique()->values());
+
+        $unmapped->each(function ($row) use ($allSerials, $devices, $deviceUsers, $cardsByPin) {
+            $row->setAttribute('source_devices', $allSerials->get($row->employee_id, collect())
+                ->map(fn ($serial) => [
+                    'serial' => $serial,
+                    'name' => $devices->get($serial)?->nama,
+                ])->values()->all());
+            $row->setAttribute('device_users', $allSerials->get($row->employee_id, collect())
+                ->map(function ($serial) use ($row, $deviceUsers, $devices) {
+                    $user = $deviceUsers->get($serial.'|'.$row->employee_id);
+
+                    return [
+                        'serial' => $serial,
+                        'device_name' => $devices->get($serial)?->nama,
+                        'user_name' => $user?->name,
+                        'card' => $user?->card,
+                    ];
+                })->values()->all());
+            $row->setAttribute('known_cards', $cardsByPin->get($row->employee_id, collect())->all());
+        });
+
+        return $unmapped;
     }
 }
