@@ -29,22 +29,23 @@ class EnrollmentReconcilerTest extends TestCase
     {
         $this->setupDevice();
 
-        (new EnrollmentReconciler())->reconcileDevice('DEV1');
+        (new EnrollmentReconciler)->reconcileDevice('DEV1');
 
         $cmd = DeviceCommand::where('device_sn', 'DEV1')->first();
         $this->assertNotNull($cmd);
         $this->assertSame('pending', $cmd->status);
         $this->assertStringContainsString('DATA UPDATE USERINFO PIN=5_4968', $cmd->body);
-        $this->assertStringContainsString("Name=Rubelyn", $cmd->body);
-        $this->assertStringContainsString('Card=55:2D:E3:D3', $cmd->body); // RFID pushed as-is (no conversion)
+        $this->assertStringContainsString('Name=Rubelyn', $cmd->body);
+        $this->assertStringContainsString('Pri=0', $cmd->body);
+        $this->assertStringContainsString('Card=[552DE3D3]', $cmd->body);
 
-        $this->assertDatabaseHas('device_enrollment', ['device_sn' => 'DEV1', 'pin' => '5_4968', 'card' => '55:2D:E3:D3']);
+        $this->assertDatabaseHas('device_enrollment', ['device_sn' => 'DEV1', 'pin' => '5_4968', 'card' => '[552DE3D3]']);
     }
 
     public function test_is_idempotent_no_duplicate_when_nothing_changed(): void
     {
         $this->setupDevice();
-        $reconciler = new EnrollmentReconciler();
+        $reconciler = new EnrollmentReconciler;
 
         $reconciler->reconcileDevice('DEV1');
         $reconciler->reconcileDevice('DEV1'); // second run
@@ -55,26 +56,50 @@ class EnrollmentReconcilerTest extends TestCase
     public function test_queues_update_when_card_changes(): void
     {
         $this->setupDevice();
-        (new EnrollmentReconciler())->reconcileDevice('DEV1');
+        (new EnrollmentReconciler)->reconcileDevice('DEV1');
         DeviceCommand::query()->delete(); // ignore the first add
 
         // RFID changes in payroll (e.g. re-issued card)
         EmployeeMap::where('device_pin', '5_4968')->update(['rfid' => '40:33:A7:BD']);
-        (new EnrollmentReconciler())->reconcileDevice('DEV1');
+        (new EnrollmentReconciler)->reconcileDevice('DEV1');
 
         $cmd = DeviceCommand::where('device_sn', 'DEV1')->first();
         $this->assertNotNull($cmd);
         $this->assertStringContainsString('DATA UPDATE USERINFO PIN=5_4968', $cmd->body);
     }
 
+    public function test_requeues_existing_colon_delimited_card_in_zkteco_format(): void
+    {
+        $this->setupDevice();
+        DeviceEnrollment::create([
+            'device_sn' => 'DEV1',
+            'pin' => '5_4968',
+            'name' => 'Rubelyn',
+            'card' => '55:2D:E3:D3',
+        ]);
+
+        (new EnrollmentReconciler)->reconcileDevice('DEV1');
+
+        $this->assertDatabaseHas('device_commands', [
+            'device_sn' => 'DEV1',
+            'body' => "DATA UPDATE USERINFO PIN=5_4968\tName=Rubelyn\tPri=0\tCard=[552DE3D3]",
+            'status' => 'pending',
+        ]);
+        $this->assertDatabaseHas('device_enrollment', [
+            'device_sn' => 'DEV1',
+            'pin' => '5_4968',
+            'card' => '[552DE3D3]',
+        ]);
+    }
+
     public function test_queues_delete_when_employee_unassigned(): void
     {
         $this->setupDevice();
-        (new EnrollmentReconciler())->reconcileDevice('DEV1'); // enrolls them
+        (new EnrollmentReconciler)->reconcileDevice('DEV1'); // enrolls them
         DeviceCommand::query()->delete();
 
         DeviceAssignment::query()->delete(); // unassigned in payroll
-        (new EnrollmentReconciler())->reconcileDevice('DEV1');
+        (new EnrollmentReconciler)->reconcileDevice('DEV1');
 
         $cmd = DeviceCommand::where('device_sn', 'DEV1')->first();
         $this->assertNotNull($cmd);
@@ -86,7 +111,7 @@ class EnrollmentReconcilerTest extends TestCase
     {
         Device::create(['no_sn' => 'DEV2', 'direction' => 'in', 'payroll_device_code' => null]);
 
-        (new EnrollmentReconciler())->reconcileDevice('DEV2');
+        (new EnrollmentReconciler)->reconcileDevice('DEV2');
 
         $this->assertSame(0, DeviceCommand::count());
     }
