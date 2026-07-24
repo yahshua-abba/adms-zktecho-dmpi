@@ -76,6 +76,20 @@ Before you begin, ensure you have the following installed on your system:
 
 You can monitor the status of devices by querying the `devices` table where the `online` field indicates the last time the device was online.
 
+## Docker Permissions on Ubuntu
+
+If `docker ps` reports `permission denied` while `sudo docker ps` works, Docker is running but your user is not allowed to access the Docker socket. Run:
+
+```bash
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+newgrp docker
+id -nG
+docker ps
+```
+
+The `id -nG` output should include `docker`. If it does not, completely log out of Ubuntu and log back in, then run `docker ps` again. Do not run `./scripts/install.sh`, `./scripts/update.sh`, or `./scripts/restart.sh` with `sudo`, because that can create root-owned project files.
+
 ## Updating an Existing Sail Installation
 
 From the project root, run:
