@@ -27,6 +27,7 @@ Route::get('monitoring', [MonitoringController::class, 'index'])->name('monitori
 Route::get('dashboard', fn () => redirect()->route('monitoring'))->name('dashboard');
 Route::get('health', fn () => redirect()->route('monitoring'))->name('health');
 Route::get('employees', [EmployeeController::class, 'index'])->name('employees.index');
+Route::post('employees/unmapped/{pin}/lookup', [EmployeeController::class, 'lookupDeviceUser'])->name('employees.unmapped.lookup');
 Route::get('activity', [ActivityController::class, 'index'])->name('activity.index');
 Route::view('help', 'help')->name('help');
 Route::get('healthz', [HealthController::class, 'json'])->name('health.json');

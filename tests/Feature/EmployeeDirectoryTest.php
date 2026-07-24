@@ -3,6 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\Attendance;
+use App\Models\Device;
+use App\Models\DeviceAssignment;
+use App\Models\DeviceEnrollment;
+use App\Models\DeviceUser;
 use App\Models\EmployeeMap;
 use App\Queries\EmployeeDirectory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -48,8 +52,8 @@ class EmployeeDirectoryTest extends TestCase
     public function test_mapped_search_matches_enrolled_device_serial(): void
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ABALES, DANICA']);
-        \App\Models\Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
+        Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
+        DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
 
         $this->assertCount(1, EmployeeDirectory::mapped('PYA8261500108')); // by serial
         $this->assertCount(1, EmployeeDirectory::mapped('X.E'));           // by device name
@@ -59,8 +63,8 @@ class EmployeeDirectoryTest extends TestCase
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ON TEST']);
         EmployeeMap::create(['device_pin' => '270_111', 'company' => '270', 'chapa' => '111', 'payroll_employee_id' => 70001, 'name' => 'NOT ON TEST']);
-        \App\Models\Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
+        Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
+        DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
 
         $filtered = EmployeeDirectory::mapped(null, 'PYA8261500108');
 
@@ -71,8 +75,8 @@ class EmployeeDirectoryTest extends TestCase
     public function test_mapped_enrolled_devices_reference_physical_serial(): void
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ABALES, DANICA']);
-        \App\Models\Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
+        Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
+        DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
 
         $devices = EmployeeDirectory::mapped()[0]->devices;
 
@@ -85,7 +89,7 @@ class EmployeeDirectoryTest extends TestCase
     public function test_mapped_enrolled_device_without_a_linked_reader_falls_back_to_code(): void
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ABALES, DANICA']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'PBW IN', 'payroll_employee_id' => 32609]);
+        DeviceAssignment::create(['device_code' => 'PBW IN', 'payroll_employee_id' => 32609]);
 
         $devices = EmployeeDirectory::mapped()[0]->devices;
 
@@ -105,5 +109,39 @@ class EmployeeDirectoryTest extends TestCase
         $this->assertCount(1, $unmapped);
         $this->assertSame('5_9999', (string) $unmapped[0]->employee_id);
         $this->assertSame(2, (int) $unmapped[0]->punch_count);
+    }
+
+    public function test_unmapped_pins_include_source_devices_and_known_cards(): void
+    {
+        Device::create(['no_sn' => 'DEV-IN', 'nama' => 'Main entrance']);
+        Device::create(['no_sn' => 'DEV-OUT', 'nama' => 'Back entrance']);
+        DeviceEnrollment::create([
+            'device_sn' => 'DEV-IN',
+            'pin' => '5_9999',
+            'name' => 'Unknown device user',
+            'card' => '1996052557',
+        ]);
+        DeviceUser::create([
+            'device_sn' => 'DEV-IN',
+            'pin' => '5_9999',
+            'name' => 'Unknown device user',
+            'card' => '1996052557',
+        ]);
+
+        $this->punch('5_9999', '2026-06-17 08:00:00');
+        Attendance::create([
+            'sn' => 'DEV-OUT', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_9999', 'timestamp' => '2026-06-17 17:00:00', 'is_sync' => false,
+        ]);
+
+        $unmapped = EmployeeDirectory::unmappedPins()->first();
+
+        $this->assertSame([
+            ['serial' => 'DEV-IN', 'name' => 'Main entrance'],
+            ['serial' => 'DEV-OUT', 'name' => 'Back entrance'],
+        ], $unmapped->source_devices);
+        $this->assertSame('Unknown device user', $unmapped->device_users[0]['user_name']);
+        $this->assertSame('1996052557', $unmapped->device_users[0]['card']);
+        $this->assertSame(['1996052557'], $unmapped->known_cards);
     }
 }
