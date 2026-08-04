@@ -450,9 +450,19 @@ php artisan config:cache route:cache
             ta.style.opacity = '0';
             document.body.appendChild(ta);
             ta.select();
-            document.execCommand('copy');
+            // execCommand reports failure by returning false rather than throwing.
+            // This is the path operators actually take — ADMS usually runs on plain
+            // HTTP over a LAN, so isSecureContext is false and the clipboard API
+            // above is unavailable — so a failed copy has to surface, not be
+            // swallowed into a "Copied!" that never happened.
+            var ok = false;
+            try {
+                ok = document.execCommand('copy');
+            } catch (e) {
+                ok = false;
+            }
             document.body.removeChild(ta);
-            return Promise.resolve();
+            return ok ? Promise.resolve() : Promise.reject(new Error('Copy command was rejected by the browser.'));
         }
 
         var btn = document.getElementById('copyToLlmBtn');

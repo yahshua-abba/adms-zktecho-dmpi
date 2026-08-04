@@ -36,6 +36,13 @@
         <div class="tab-pane fade {{ $tab === 'mapped' ? 'show active' : '' }}" id="tab-mapped" role="tabpanel">
             <div class="filter-bar">
                 <form method="GET" action="{{ route('employees.index') }}" class="row g-2 align-items-end">
+                    {{-- A GET submit rebuilds the query string from this form alone, so
+                         carry the two tables' page sizes and the active tab through it —
+                         otherwise searching silently resets both tables to the default
+                         page size and drops you back on the mapped tab. --}}
+                    <input type="hidden" name="tab" value="mapped">
+                    <input type="hidden" name="mapped_per_page" value="{{ $mapped->perPage() }}">
+                    <input type="hidden" name="unmapped_per_page" value="{{ $unmapped->perPage() }}">
                     <div class="col-sm-6 col-md-5">
                         <label class="form-label small mb-1">Search (any column)</label>
                         <input type="text" name="search" value="{{ $search }}" class="form-control" placeholder="name, CHAPA, PIN, RFID, payroll #, or device serial">

@@ -111,4 +111,17 @@ class UiPagesTest extends TestCase
         $response->assertSee('tab-pane fade show active" id="tab-unmapped"', false);
         $response->assertDontSee('tab-pane fade show active" id="tab-mapped"', false);
     }
+
+    public function test_employees_search_form_carries_both_page_sizes_through_a_submit(): void
+    {
+        // The search form submits by GET, which rebuilds the query string from the
+        // form's own fields — so without these hidden inputs a search would silently
+        // reset both tables to the default page size.
+        $response = $this->get('/employees?mapped_per_page=50&unmapped_per_page=10');
+
+        $response->assertOk();
+        $response->assertSee('<input type="hidden" name="mapped_per_page" value="50">', false);
+        $response->assertSee('<input type="hidden" name="unmapped_per_page" value="10">', false);
+        $response->assertSee('<input type="hidden" name="tab" value="mapped">', false);
+    }
 }

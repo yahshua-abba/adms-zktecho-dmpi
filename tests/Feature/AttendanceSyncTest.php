@@ -238,6 +238,44 @@ class AttendanceSyncTest extends TestCase
         $this->assertCount(1, $payroll->pushed);
         $this->assertTrue($excluded->fresh()->is_sync);
         $this->assertFalse($other->fresh()->is_sync);
+
+        // The "skip" mark only ever applies to unsynced rows, so pushing a
+        // hand-picked excluded punch has to clear it rather than leave the row
+        // sitting at is_sync=true alongside sync_excluded=true.
+        $this->assertFalse($excluded->fresh()->sync_excluded);
+    }
+
+    public function test_locally_rejected_punches_are_reported_as_failures(): void
+    {
+        // No device direction => log_type null; and no employee_map row for the PIN.
+        // Neither punch ever reaches payroll, but both are real failures the caller
+        // has to hear about — a silent "0 failed" reads as "nothing to do".
+        Device::create(['no_sn' => 'DEV-NONE']);
+        $this->map(['device_pin' => '5_4968', 'payroll_employee_id' => 48213]);
+
+        $noDirection = Attendance::create([
+            'sn' => 'DEV-NONE', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00',
+            'log_type' => null, 'is_sync' => false,
+        ]);
+        $unmapped = Attendance::create([
+            'sn' => 'DEV-NONE', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_0000', 'timestamp' => '2026-06-17 08:01:00',
+            'log_type' => 'in', 'is_sync' => false,
+        ]);
+
+        $sync = new AttendanceSync($payroll = new FakePayrollClient);
+
+        $this->assertSame(['synced' => 0, 'failed' => 2], $sync->sync());
+        $this->assertCount(0, $payroll->pushed);
+        $this->assertNotNull($noDirection->fresh()->sync_error);
+        $this->assertNotNull($unmapped->fresh()->sync_error);
+
+        // Same accounting through the hand-picked path.
+        $this->assertSame(
+            ['synced' => 0, 'failed' => 2],
+            $sync->syncIds([$noDirection->id, $unmapped->id])
+        );
     }
 
     public function test_sync_ids_ignores_ids_already_synced(): void

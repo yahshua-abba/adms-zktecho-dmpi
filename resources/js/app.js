@@ -26,7 +26,7 @@ window.TomSelect = TomSelect;
  * The DataTables initialisers stay inline in the Blade views because they
  * interpolate route URLs and column definitions, so jQuery has to be reachable
  * from a plain <script>. Those inline blocks must wait for DOMContentLoaded:
- * @vite emits this bundle as a deferred module, so it executes *after* any
- * inline script is parsed but *before* DOMContentLoaded fires.
+ * the Vite directive emits this bundle as a deferred module, so it executes
+ * *after* any inline script is parsed but *before* DOMContentLoaded fires.
  */
 window.$ = window.jQuery = $;

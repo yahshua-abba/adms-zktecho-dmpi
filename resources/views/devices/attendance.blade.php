@@ -177,12 +177,24 @@
         }
         syncExportLink();
 
-        $('#filterForm').on('submit', function (e) { e.preventDefault(); table.draw(); syncExportLink(); });
-        $('#f_device, #f_company, #f_sync').on('change', function () { table.draw(); syncExportLink(); });
-        $('#clearFilters').on('click', function () {
-            $('#f_device, #f_company, #f_sync, #f_employee').val('');
+        // Row selection deliberately survives paging, but NOT a filter change: the
+        // bulk actions (delete, exclude, sync) would otherwise act on rows the
+        // operator can no longer see, since a new filter can hide anything already
+        // ticked. Clearing on every filter-driven redraw keeps "selected" and
+        // "on screen" honest. (selectedIds/syncCheckboxesToSelection are defined
+        // just below; both exist by the time a user event can fire this.)
+        function redrawForFilters() {
+            selectedIds.clear();
+            syncCheckboxesToSelection();
             table.draw();
             syncExportLink();
+        }
+
+        $('#filterForm').on('submit', function (e) { e.preventDefault(); redrawForFilters(); });
+        $('#f_device, #f_company, #f_sync').on('change', redrawForFilters);
+        $('#clearFilters').on('click', function () {
+            $('#f_device, #f_company, #f_sync, #f_employee').val('');
+            redrawForFilters();
         });
 
         // --- Row selection (persists across pages/redraws; a plain JS Set of ids) ---

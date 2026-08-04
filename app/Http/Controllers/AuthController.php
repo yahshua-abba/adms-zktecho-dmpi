@@ -37,9 +37,13 @@ class AuthController extends Controller
             ]);
         }
 
-        // hash_equals for constant-time comparison of both fields.
-        $matches = hash_equals($configuredUsername, (string) $request->input('username'))
-            && hash_equals($configuredPassword, (string) $request->input('password'));
+        // hash_equals for constant-time comparison of both fields. Both are
+        // evaluated before they're combined — a short-circuiting `&&` would skip
+        // the password check whenever the username is wrong, and the response-time
+        // difference would tell an attacker when they'd guessed the username.
+        $usernameMatches = hash_equals($configuredUsername, (string) $request->input('username'));
+        $passwordMatches = hash_equals($configuredPassword, (string) $request->input('password'));
+        $matches = $usernameMatches && $passwordMatches;
 
         if (! $matches) {
             return back()->withInput($request->only('username'))->withErrors([

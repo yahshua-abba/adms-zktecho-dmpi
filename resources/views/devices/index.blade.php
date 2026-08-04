@@ -152,10 +152,14 @@
             var direction = $('#f_direction').val();
             var linked = $('#f_linked').val();
 
-            if (search && row.data('search').indexOf(search) === -1) return false;
-            if (online && row.data('online') !== online) return false;
-            if (direction && String(row.data('direction')) !== direction) return false;
-            if (linked && row.data('linked') !== linked) return false;
+            // .attr(), not .data(): jQuery's .data() coerces an attribute that
+            // looks like a number into a Number (and caches the first read), so a
+            // row whose searchable text is all digits would break .indexOf below.
+            // Reading the attributes raw keeps every value a string.
+            if (search && (row.attr('data-search') || '').indexOf(search) === -1) return false;
+            if (online && row.attr('data-online') !== online) return false;
+            if (direction && row.attr('data-direction') !== direction) return false;
+            if (linked && row.attr('data-linked') !== linked) return false;
 
             return true;
         });
@@ -192,9 +196,13 @@
                         badge.className = 'status-badge badge ' + (s.online ? 'bg-success' : 'bg-secondary');
                         badge.textContent = '● ' + (s.online ? 'Online' : 'Offline');
                         if (seen) seen.textContent = s.seen ? ('seen ' + s.seen) : 'never seen';
-                        $(cell).closest('tr').attr('data-online', s.online ? 'online' : 'offline').data('online', s.online ? 'online' : 'offline');
+                        $(cell).closest('tr').attr('data-online', s.online ? 'online' : 'offline');
                     });
-                    table.draw();
+                    // draw(false) keeps the current page — this poll fires every
+                    // minute, and a bare draw() would bounce an operator reading
+                    // page 3 back to page 1 each time. The filter handlers above
+                    // keep the plain draw(), where resetting to page 1 is right.
+                    table.draw(false);
                 })
                 .catch(function () { /* ignore transient errors */ });
         }, 60000);

@@ -90,6 +90,22 @@ class AttendanceScreenTest extends TestCase
         $this->assertFalse($punch->fresh()->sync_excluded);
     }
 
+    public function test_exclude_leaves_already_synced_punches_untouched(): void
+    {
+        // sync_excluded only ever applies to unsynced rows. A selection that mixes
+        // pending and synced punches must not leave a synced row marked "skipped".
+        $pending = $this->punch(['is_sync' => false]);
+        $synced = $this->punch(['is_sync' => true, 'timestamp' => '2026-06-17 09:00:00']);
+
+        $response = $this->postJson('/attendance/exclude', [
+            'ids' => [$pending->id, $synced->id], 'excluded' => 1,
+        ])->assertOk();
+
+        $this->assertTrue($pending->fresh()->sync_excluded);
+        $this->assertFalse($synced->fresh()->sync_excluded);
+        $this->assertStringContainsString('1 already-synced', $response->json('message'));
+    }
+
     public function test_excluded_punches_are_skipped_by_the_scheduled_sync_button(): void
     {
         $this->app->instance(PayrollClient::class, $fake = new FakePayrollClient);

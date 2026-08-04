@@ -344,11 +344,25 @@ class DeviceController extends Controller
         $ids = $this->validatedAttendanceIds($request);
         $excluded = $request->boolean('excluded');
 
-        $count = Attendance::whereIn('id', $ids)->update(['sync_excluded' => $excluded]);
+        // sync_excluded is a "don't push this yet" mark, so it only ever applies to
+        // unsynced rows — skipping an already-synced punch is meaningless. Filtering
+        // here keeps a selection that mixes synced and pending rows from leaving
+        // is_sync=true alongside sync_excluded=true.
+        $selected = Attendance::whereIn('id', $ids);
+        $count = (clone $selected)->where('is_sync', false)->count();
+        $skipped = (clone $selected)->where('is_sync', true)->count();
+
+        Attendance::whereIn('id', $ids)
+            ->where('is_sync', false)
+            ->update(['sync_excluded' => $excluded]);
 
         $message = $excluded
             ? "{$count} punch(es) excluded from sync — they won't be pushed automatically."
             : "{$count} punch(es) re-included for sync.";
+
+        if ($skipped > 0) {
+            $message .= " {$skipped} already-synced punch(es) were left unchanged.";
+        }
 
         return response()->json(['message' => $message]);
     }
