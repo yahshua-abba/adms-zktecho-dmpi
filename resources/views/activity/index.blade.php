@@ -21,26 +21,31 @@
     </div>
 
     <div class="table-card">
-        <table class="table table-hover align-middle">
-            <thead>
-                <tr><th>Time</th><th>Level</th><th>Event</th><th>Message</th></tr>
-            </thead>
-            <tbody>
-                @forelse ($logs as $log)
-                    <tr>
-                        <td class="text-nowrap small">{{ $log->created_at }}</td>
-                        <td>
-                            @php $cls = ['info'=>'bg-secondary','warning'=>'bg-warning text-dark','error'=>'bg-danger'][$log->level] ?? 'bg-secondary'; @endphp
-                            <span class="badge {{ $cls }}">{{ $log->level }}</span>
-                        </td>
-                        <td><code>{{ $log->event }}</code></td>
-                        <td>{{ $log->message }}</td>
-                    </tr>
-                @empty
-                    <tr><td colspan="4" class="text-muted text-center py-3">No activity yet.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-        <div class="d-flex justify-content-center">{{ $logs->links() }}</div>
+        <div class="d-flex justify-content-end mb-3">
+            @include('partials.per-page-select', ['paginator' => $logs, 'param' => 'per_page', 'pageParam' => 'page'])
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr><th>Time</th><th>Level</th><th>Event</th><th>Message</th></tr>
+                </thead>
+                <tbody>
+                    @forelse ($logs as $log)
+                        <tr>
+                            <td class="text-nowrap small">{{ $log->created_at }}</td>
+                            <td>
+                                @php $cls = ['info'=>'bg-secondary','warning'=>'bg-warning text-dark','error'=>'bg-danger'][$log->level] ?? 'bg-secondary'; @endphp
+                                <span class="badge {{ $cls }}">{{ $log->level }}</span>
+                            </td>
+                            <td><code>{{ $log->event }}</code></td>
+                            <td>{{ $log->message }}</td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="4" class="text-muted text-center py-3">No activity yet.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+        @include('partials.pagination-footer', ['paginator' => $logs])
     </div>
 @endsection

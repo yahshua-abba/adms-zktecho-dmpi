@@ -55,13 +55,18 @@
 
 @push('scripts')
 <script>
-    $(function () {
+    // Not $(function () {...}): the Vite bundle is a deferred module, so jQuery
+    // doesn't exist yet while this inline script is being parsed. Deferred modules
+    // do run before DOMContentLoaded, so $ is available inside the callback.
+    document.addEventListener('DOMContentLoaded', function () {
         var hasDevice = @json($showDevice);
         var table = $('#logs').DataTable({
             processing: true,
             serverSide: true,
             searching: false,
             order: [],
+            lengthMenu: @json(\App\Support\PerPage::OPTIONS),
+            pageLength: {{ \App\Support\PerPage::DEFAULT }},
             ajax: {
                 url: '{{ $ajax }}',
                 data: function (d) {

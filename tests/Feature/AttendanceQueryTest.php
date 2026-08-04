@@ -53,6 +53,26 @@ class AttendanceQueryTest extends TestCase
         $this->assertSame([$pending->id], AttendanceQuery::filtered(['sync' => 'pending'])->pluck('id')->all());
     }
 
+    public function test_skipped_filter_matches_excluded_unsynced_punches_only(): void
+    {
+        $skipped = $this->punch(['is_sync' => false, 'sync_excluded' => true, 'timestamp' => '2026-06-17 08:00:00']);
+        $this->punch(['is_sync' => true, 'sync_excluded' => true, 'timestamp' => '2026-06-17 08:01:00']); // synced wins over skipped
+        $this->punch(['is_sync' => false, 'sync_excluded' => false, 'timestamp' => '2026-06-17 08:02:00']);
+
+        $this->assertSame([$skipped->id], AttendanceQuery::filtered(['sync' => 'skipped'])->pluck('id')->all());
+    }
+
+    public function test_pending_and_failed_filters_exclude_skipped_punches(): void
+    {
+        $pending = $this->punch(['is_sync' => false, 'sync_excluded' => false, 'sync_error' => null, 'timestamp' => '2026-06-17 08:00:00']);
+        $failed = $this->punch(['is_sync' => false, 'sync_excluded' => false, 'sync_error' => 'No Employee', 'timestamp' => '2026-06-17 08:01:00']);
+        $this->punch(['is_sync' => false, 'sync_excluded' => true, 'sync_error' => null, 'timestamp' => '2026-06-17 08:02:00']);
+        $this->punch(['is_sync' => false, 'sync_excluded' => true, 'sync_error' => 'No Employee', 'timestamp' => '2026-06-17 08:03:00']);
+
+        $this->assertSame([$pending->id], AttendanceQuery::filtered(['sync' => 'pending'])->pluck('id')->all());
+        $this->assertSame([$failed->id], AttendanceQuery::filtered(['sync' => 'failed'])->pluck('id')->all());
+    }
+
     public function test_filters_by_employee_chapa_or_name(): void
     {
         EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'ABABA, Rubelyn']);

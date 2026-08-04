@@ -18,22 +18,22 @@
 
     <ul class="nav nav-tabs mb-3" role="tablist">
         <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="mapped-tab" data-bs-toggle="tab" data-bs-target="#tab-mapped" type="button" role="tab">
+            <button class="nav-link {{ $tab === 'mapped' ? 'active' : '' }}" id="mapped-tab" data-bs-toggle="tab" data-bs-target="#tab-mapped" type="button" role="tab">
                 <i class="bi bi-person-check"></i> Mapped
-                <span class="badge bg-secondary ms-1">{{ $mapped->count() }}</span>
+                <span class="badge bg-secondary ms-1">{{ $mapped->total() }}</span>
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="unmapped-tab" data-bs-toggle="tab" data-bs-target="#tab-unmapped" type="button" role="tab">
+            <button class="nav-link {{ $tab === 'unmapped' ? 'active' : '' }}" id="unmapped-tab" data-bs-toggle="tab" data-bs-target="#tab-unmapped" type="button" role="tab">
                 <i class="bi bi-person-exclamation"></i> Unmapped PINs
-                <span class="badge {{ $unmapped->count() ? 'bg-danger' : 'bg-secondary' }} ms-1">{{ $unmapped->count() }}</span>
+                <span class="badge {{ $unmapped->total() ? 'bg-danger' : 'bg-secondary' }} ms-1">{{ $unmapped->total() }}</span>
             </button>
         </li>
     </ul>
 
     <div class="tab-content">
         {{-- ─── Mapped roster ─── --}}
-        <div class="tab-pane fade show active" id="tab-mapped" role="tabpanel">
+        <div class="tab-pane fade {{ $tab === 'mapped' ? 'show active' : '' }}" id="tab-mapped" role="tabpanel">
             <div class="filter-bar">
                 <form method="GET" action="{{ route('employees.index') }}" class="row g-2 align-items-end">
                     <div class="col-sm-6 col-md-5">
@@ -61,6 +61,9 @@
             </div>
 
             <div class="table-card">
+                <div class="d-flex justify-content-end mb-3">
+                    @include('partials.per-page-select', ['paginator' => $mapped, 'param' => 'mapped_per_page', 'pageParam' => 'mapped_page', 'extra' => ['tab' => 'mapped']])
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
                         <thead>
@@ -96,18 +99,22 @@
                         </tbody>
                     </table>
                 </div>
+                @include('partials.pagination-footer', ['paginator' => $mapped])
             </div>
         </div>
 
         {{-- ─── Unmapped device PINs ─── --}}
-        <div class="tab-pane fade" id="tab-unmapped" role="tabpanel">
+        <div class="tab-pane fade {{ $tab === 'unmapped' ? 'show active' : '' }}" id="tab-unmapped" role="tabpanel">
             <div class="table-card">
-                @if ($unmapped->count())
+                @if ($unmapped->total())
                     <div class="alert alert-warning small mb-3">
                         <i class="bi bi-exclamation-triangle"></i>
                         These PINs are tapping on devices but aren't matched to any employee yet, so their punches <strong>won't sync to payroll</strong>. Fix by enrolling each device user with PIN = <code>{company}_{CHAPA}</code>, or by syncing the roster from DMPI.
                     </div>
                 @endif
+                <div class="d-flex justify-content-end mb-3">
+                    @include('partials.per-page-select', ['paginator' => $unmapped, 'param' => 'unmapped_per_page', 'pageParam' => 'unmapped_page', 'extra' => ['tab' => 'unmapped']])
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
                         <thead>
@@ -126,6 +133,7 @@
                         </tbody>
                     </table>
                 </div>
+                @include('partials.pagination-footer', ['paginator' => $unmapped])
             </div>
         </div>
     </div>

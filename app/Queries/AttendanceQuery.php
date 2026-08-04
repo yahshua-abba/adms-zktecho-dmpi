@@ -16,7 +16,7 @@ use Illuminate\Support\Carbon;
  * directly, independent of HTTP or the DataTables JSON envelope.
  *
  * Recognised keys: date_from, date_to (Y-m-d), device (sn),
- * sync ("synced"|"failed"|"pending"), employee (matches CHAPA or mapped name).
+ * sync ("synced"|"failed"|"pending"|"skipped"), employee (matches CHAPA or mapped name).
  */
 class AttendanceQuery
 {
@@ -40,8 +40,11 @@ class AttendanceQuery
         if (! empty($filters['sync'])) {
             match ($filters['sync']) {
                 'synced' => $query->where('is_sync', true),
-                'failed' => $query->where('is_sync', false)->whereNotNull('sync_error'),
-                'pending' => $query->where('is_sync', false)->whereNull('sync_error'),
+                // "skipped" (manually excluded) takes precedence over failed/pending
+                // so a punch never shows under two different status filters.
+                'skipped' => $query->where('is_sync', false)->where('sync_excluded', true),
+                'failed' => $query->where('is_sync', false)->where('sync_excluded', false)->whereNotNull('sync_error'),
+                'pending' => $query->where('is_sync', false)->where('sync_excluded', false)->whereNull('sync_error'),
                 default => null,
             };
         }

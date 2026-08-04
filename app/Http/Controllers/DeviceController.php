@@ -2,24 +2,32 @@
 
 namespace App\Http\Controllers;
 
-use Yajra\DataTables\Facades\DataTables;
-use Illuminate\Http\Request;
-use App\Models\Device;
+use App\Models\ActivityLog;
 use App\Models\Attendance;
+use App\Models\Device;
+use App\Models\EmployeeMap;
+use App\Models\PayrollDevice;
 use App\Queries\AttendanceQuery;
 use App\Queries\LogQuery;
-use DB;
+use App\Sync\AttendanceSync;
+use App\Sync\DeviceInfoSync;
+use App\Sync\EnrollmentReconciler;
+use App\Sync\RosterSync;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Yajra\DataTables\Facades\DataTables;
 
 class DeviceController extends Controller
 {
     // Menampilkan daftar device
     public function index(Request $request)
     {
-        $data['lable'] = "Devices";
+        $data['lable'] = 'Devices';
         // Use the Device model (not a raw row) so the view can call isOnline()/status.
         $data['log'] = Device::orderBy('online', 'DESC')->get();
-        $data['payrollDevices'] = \App\Models\PayrollDevice::orderBy('code')->get();
-        return view('devices.index',$data);
+        $data['payrollDevices'] = PayrollDevice::orderBy('code')->get();
+
+        return view('devices.index', $data);
     }
 
     public function DeviceLog(Request $request)
@@ -65,7 +73,7 @@ class DeviceController extends Controller
                 ->editColumn('created_at', fn ($row) => (string) $row->created_at)
                 ->addColumn('device', fn ($row) => $this->logDevice($row))
                 ->addColumn('event', fn ($row) => $this->describeLogEvent($table, $row))
-                ->addColumn('details', fn ($row) => '<code class="small text-muted">'.e(\Illuminate\Support\Str::limit(trim((string) ($row->data ?: $row->url)), 90)).'</code>')
+                ->addColumn('details', fn ($row) => '<code class="small text-muted">'.e(Str::limit(trim((string) ($row->data ?: $row->url)), 90)).'</code>')
                 ->rawColumns(['device', 'event', 'details'])
                 ->make(true);
         }
@@ -110,7 +118,9 @@ class DeviceController extends Controller
             default => '<span class="badge bg-light text-dark border">Data received</span>',
         };
     }
-    public function Attendance(Request $request) {
+
+    public function Attendance(Request $request)
+    {
         if ($request->ajax()) {
             $query = AttendanceQuery::filtered($request->only(['date_from', 'date_to', 'device', 'employee', 'sync', 'company']))
                 ->leftJoin('employee_map', 'employee_map.device_pin', '=', 'attendances.employee_id')
@@ -156,6 +166,9 @@ class DeviceController extends Controller
                     if ($row->is_sync) {
                         return '<span class="badge bg-success">synced</span>';
                     }
+                    if ($row->sync_excluded) {
+                        return '<span class="badge bg-warning text-dark" title="Excluded from sync — won\'t be pushed automatically">skipped</span>';
+                    }
                     if ($row->sync_error) {
                         return '<span class="badge bg-danger" title="'.e($row->sync_error).'">failed</span>';
                     }
@@ -175,7 +188,7 @@ class DeviceController extends Controller
 
         return view('devices.attendance', [
             'devices' => Device::orderBy('no_sn')->get(),
-            'companies' => \App\Models\EmployeeMap::whereNotNull('company')->distinct()->orderBy('company')->pluck('company'),
+            'companies' => EmployeeMap::whereNotNull('company')->distinct()->orderBy('company')->pluck('company'),
             'filters' => $request->only(['date_from', 'date_to', 'device', 'employee', 'sync', 'company']),
         ]);
     }
@@ -223,7 +236,9 @@ class DeviceController extends Controller
 
             $query->chunk(2000, function ($rows) use ($out) {
                 foreach ($rows as $row) {
-                    $status = $row->is_sync ? 'synced' : ($row->sync_error ? 'failed' : 'pending');
+                    $status = $row->is_sync
+                        ? 'synced'
+                        : ($row->sync_excluded ? 'skipped' : ($row->sync_error ? 'failed' : 'pending'));
 
                     fputcsv($out, [
                         $row->id,
@@ -278,34 +293,87 @@ class DeviceController extends Controller
     // Manual "Sync from DMPI" button — pulls the roster + device info from DMPI,
     // then re-queues enrollment commands so RFID/assignment changes reach devices.
     public function syncFromDmpi(
-        \App\Sync\RosterSync $roster,
-        \App\Sync\DeviceInfoSync $devices,
-        \App\Sync\EnrollmentReconciler $reconciler
+        RosterSync $roster,
+        DeviceInfoSync $devices,
+        EnrollmentReconciler $reconciler
     ) {
         try {
             $roster->sync();
             $devices->sync();
             $reconciler->reconcileAll();
-            \App\Models\ActivityLog::record('dmpi.pull', 'Pulled roster + devices from DMPI and reconciled enrollments (manual).');
+            ActivityLog::record('dmpi.pull', 'Pulled roster + devices from DMPI and reconciled enrollments (manual).');
 
             return redirect()->back()->with('success', 'Synced from DMPI — roster, devices, and enrollments updated.');
         } catch (\Throwable $e) {
-            \App\Models\ActivityLog::record('dmpi.pull', 'Manual DMPI sync failed: '.$e->getMessage(), 'error');
+            ActivityLog::record('dmpi.pull', 'Manual DMPI sync failed: '.$e->getMessage(), 'error');
 
             return redirect()->back()->with('error', 'Sync from DMPI failed: '.$e->getMessage());
         }
     }
 
-    // Manual "Sync to payroll now" button — pushes pending punches to DMPI.
-    public function syncAttendances(\App\Sync\AttendanceSync $sync)
+    // Manual "Sync to payroll now" button — pushes ALL pending (non-excluded)
+    // punches to DMPI, same as the scheduled sync-attendances command.
+    public function syncAttendances(AttendanceSync $sync)
     {
         $sync->sync((int) config('payroll.batch_size'));
 
         return redirect()->route('devices.Attendance')->with('success', 'Pushed pending punches to payroll.');
     }
 
+    // Attendance screen row-selection toolbar: "Sync selected" — pushes only the
+    // hand-picked punches, bypassing sync_excluded (an explicit pick overrides a
+    // standing "skip" mark). Already-synced ids in the selection are ignored.
+    public function syncSelectedAttendances(Request $request, AttendanceSync $sync)
+    {
+        $ids = $this->validatedAttendanceIds($request);
+        $result = $sync->syncIds($ids);
+
+        $message = "Synced {$result['synced']} selected punch(es) to payroll.";
+        if ($result['failed'] > 0) {
+            $message .= " {$result['failed']} failed — see the Sync column for the reason.";
+        }
+
+        return response()->json(['message' => $message]);
+    }
+
+    // Attendance screen row-selection toolbar: "Exclude from sync" / "Include in
+    // sync" — flips sync_excluded so the automatic/scheduled sync stops (or
+    // resumes) pushing the selected punches.
+    public function excludeAttendances(Request $request)
+    {
+        $ids = $this->validatedAttendanceIds($request);
+        $excluded = $request->boolean('excluded');
+
+        $count = Attendance::whereIn('id', $ids)->update(['sync_excluded' => $excluded]);
+
+        $message = $excluded
+            ? "{$count} punch(es) excluded from sync — they won't be pushed automatically."
+            : "{$count} punch(es) re-included for sync.";
+
+        return response()->json(['message' => $message]);
+    }
+
+    // Attendance screen row-selection toolbar: "Delete selected" — permanently
+    // removes the chosen punches from ADMS. This does not un-send anything already
+    // pushed to payroll; it only removes the local record.
+    public function destroyAttendances(Request $request)
+    {
+        $ids = $this->validatedAttendanceIds($request);
+        $count = Attendance::whereIn('id', $ids)->delete();
+
+        return response()->json(['message' => "Deleted {$count} punch(es)."]);
+    }
+
+    private function validatedAttendanceIds(Request $request): array
+    {
+        return $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer'],
+        ])['ids'];
+    }
+
     // Manually queue enrollment commands for one device (the "Sync enrollments" button).
-    public function syncEnrollments(Device $device, \App\Sync\EnrollmentReconciler $reconciler)
+    public function syncEnrollments(Device $device, EnrollmentReconciler $reconciler)
     {
         $reconciler->reconcileDevice($device->no_sn);
 
