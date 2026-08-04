@@ -27,7 +27,7 @@ class ActivityLogTest extends TestCase
 
     public function test_sync_attendances_command_records_activity(): void
     {
-        $fake = new FakePayrollClient();
+        $fake = new FakePayrollClient;
         $this->app->instance(PayrollClient::class, $fake);
         Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
         EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'X']);
@@ -46,5 +46,28 @@ class ActivityLogTest extends TestCase
 
         $this->get('/activity')->assertOk()->assertSee('Roster ok')->assertSee('Sync failed: boom');
         $this->get('/activity?level=error')->assertOk()->assertSee('Sync failed: boom')->assertDontSee('Roster ok');
+    }
+
+    public function test_activity_page_paginates_and_honors_per_page(): void
+    {
+        foreach (range(1, 11) as $i) {
+            ActivityLog::record('roster.sync', sprintf('Entry %02d', $i));
+        }
+
+        $response = $this->get('/activity?per_page=10');
+
+        $response->assertOk();
+        $response->assertSee('Entry 11'); // newest first
+        $response->assertDontSee('Entry 01');
+        $response->assertSee('Showing 1 to 10 of 11 entries');
+        $response->assertSee('value="10" selected', false);
+    }
+
+    public function test_activity_per_page_outside_the_allowed_options_falls_back_to_default(): void
+    {
+        $response = $this->get('/activity?per_page=999999');
+
+        $response->assertOk();
+        $response->assertSee('value="25" selected', false);
     }
 }

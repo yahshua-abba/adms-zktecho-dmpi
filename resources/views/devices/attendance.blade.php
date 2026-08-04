@@ -16,13 +16,18 @@
             <a href="{{ route('attendance.export') }}" id="exportBtn" class="btn btn-outline-primary"><i class="bi bi-download"></i> Export CSV</a>
             <form action="{{ route('attendance.sync') }}" method="POST">
                 @csrf
-                <button type="submit" class="btn btn-success"><i class="bi bi-arrow-repeat"></i> Sync to payroll now</button>
+                <button type="submit" class="btn btn-success" title="Pushes every pending punch, not just what's shown or selected below"><i class="bi bi-arrow-repeat"></i> Sync to payroll now</button>
             </form>
         </div>
     </div>
 
+    <div id="ajaxAlerts"></div>
+
     @if (session('success'))
         <div class="alert alert-success">{{ session('success') }}</div>
+    @endif
+    @if (session('error'))
+        <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
 
     <div class="filter-bar">
@@ -71,6 +76,7 @@
                         <option value="synced" @selected($sync === 'synced')>Synced</option>
                         <option value="pending" @selected($sync === 'pending')>Pending</option>
                         <option value="failed" @selected($sync === 'failed')>Failed</option>
+                        <option value="skipped" @selected($sync === 'skipped')>Skipped</option>
                     </select>
                 </div>
                 {{-- Employee + actions --}}
@@ -86,10 +92,23 @@
         </form>
     </div>
 
+    <div id="selectionToolbar" class="table-card d-none mb-3 d-flex flex-wrap align-items-center gap-2 py-2 px-3">
+        <span class="fw-semibold"><span id="selCount">0</span> selected</span>
+        <span class="text-muted small">(selection is kept as you page through the table)</span>
+        <div class="ms-auto d-flex flex-wrap gap-2">
+            <button type="button" id="syncSelectedBtn" class="btn btn-sm btn-success"><i class="bi bi-arrow-repeat"></i> Sync selected</button>
+            <button type="button" id="excludeSelectedBtn" class="btn btn-sm btn-outline-warning"><i class="bi bi-slash-circle"></i> Exclude from sync</button>
+            <button type="button" id="includeSelectedBtn" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-counterclockwise"></i> Include in sync</button>
+            <button type="button" id="deleteSelectedBtn" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Delete selected</button>
+            <button type="button" id="clearSelectionBtn" class="btn btn-sm btn-link">Clear selection</button>
+        </div>
+    </div>
+
     <div class="table-card">
         <table class="table table-hover align-middle w-100" id="attendance">
             <thead>
                 <tr>
+                    <th style="width:1%"><input type="checkbox" class="form-check-input" id="selectAllOnPage" title="Select all rows on this page"></th>
                     <th>ID</th>
                     <th>Punched <div class="small text-muted fw-normal">at device</div></th>
                     <th>Received <div class="small text-muted fw-normal">by ADMS</div></th>
@@ -106,7 +125,10 @@
 
 @push('scripts')
 <script>
-    $(function () {
+    // Not $(function () {...}): the Vite bundle is a deferred module, so jQuery
+    // doesn't exist yet while this inline script is being parsed. Deferred modules
+    // do run before DOMContentLoaded, so $ is available inside the callback.
+    document.addEventListener('DOMContentLoaded', function () {
         function currentFilters() {
             return {
                 date_from: $('#f_date_from').val(),
@@ -123,11 +145,17 @@
             serverSide: true,
             searching: false,
             order: [],
+            lengthMenu: @json(\App\Support\PerPage::OPTIONS),
+            pageLength: {{ \App\Support\PerPage::DEFAULT }},
             ajax: {
                 url: '{{ route('devices.Attendance') }}',
                 data: function (d) { Object.assign(d, currentFilters()); }
             },
             columns: [
+                {
+                    data: 'id', orderable: false, searchable: false, className: 'text-center',
+                    render: function (id) { return '<input type="checkbox" class="form-check-input row-select" value="' + id + '">'; }
+                },
                 { data: 'id', name: 'attendances.id' },
                 { data: 'timestamp', name: 'attendances.timestamp' },
                 { data: 'received_at', name: 'attendances.created_at' },
@@ -136,7 +164,8 @@
                 { data: 'employee_display', orderable: false, searchable: false },
                 { data: 'sync_status', orderable: false, searchable: false },
                 { data: 'synced_at', name: 'attendances.sync_time' },
-            ]
+            ],
+            drawCallback: function () { syncCheckboxesToSelection(); }
         });
 
         // Keep the Export link pointed at the same filters the table is showing,
@@ -148,12 +177,128 @@
         }
         syncExportLink();
 
-        $('#filterForm').on('submit', function (e) { e.preventDefault(); table.draw(); syncExportLink(); });
-        $('#f_device, #f_company, #f_sync').on('change', function () { table.draw(); syncExportLink(); });
-        $('#clearFilters').on('click', function () {
-            $('#f_device, #f_company, #f_sync, #f_employee').val('');
+        // Row selection deliberately survives paging, but NOT a filter change: the
+        // bulk actions (delete, exclude, sync) would otherwise act on rows the
+        // operator can no longer see, since a new filter can hide anything already
+        // ticked. Clearing on every filter-driven redraw keeps "selected" and
+        // "on screen" honest. (selectedIds/syncCheckboxesToSelection are defined
+        // just below; both exist by the time a user event can fire this.)
+        function redrawForFilters() {
+            selectedIds.clear();
+            syncCheckboxesToSelection();
             table.draw();
             syncExportLink();
+        }
+
+        $('#filterForm').on('submit', function (e) { e.preventDefault(); redrawForFilters(); });
+        $('#f_device, #f_company, #f_sync').on('change', redrawForFilters);
+        $('#clearFilters').on('click', function () {
+            $('#f_device, #f_company, #f_sync, #f_employee').val('');
+            redrawForFilters();
+        });
+
+        // --- Row selection (persists across pages/redraws; a plain JS Set of ids) ---
+        var selectedIds = new Set();
+
+        function syncCheckboxesToSelection() {
+            $('#attendance tbody .row-select').each(function () {
+                $(this).prop('checked', selectedIds.has(String($(this).val())));
+            });
+            var visible = $('#attendance tbody .row-select');
+            var allChecked = visible.length > 0 && visible.filter(':checked').length === visible.length;
+            $('#selectAllOnPage').prop('checked', allChecked);
+            updateToolbar();
+        }
+
+        function updateToolbar() {
+            $('#selCount').text(selectedIds.size);
+            $('#selectionToolbar').toggleClass('d-none', selectedIds.size === 0);
+        }
+
+        $('#attendance tbody').on('change', '.row-select', function () {
+            var id = String($(this).val());
+            if (this.checked) { selectedIds.add(id); } else { selectedIds.delete(id); }
+            updateToolbar();
+        });
+
+        $('#selectAllOnPage').on('change', function () {
+            var checked = this.checked;
+            $('#attendance tbody .row-select').each(function () {
+                $(this).prop('checked', checked);
+                var id = String($(this).val());
+                if (checked) { selectedIds.add(id); } else { selectedIds.delete(id); }
+            });
+            updateToolbar();
+        });
+
+        $('#clearSelectionBtn').on('click', function () {
+            selectedIds.clear();
+            syncCheckboxesToSelection();
+        });
+
+        // --- Bulk actions ---
+        function showAlert(type, message) {
+            var $alert = $('<div class="alert alert-' + type + ' alert-dismissible fade show" role="alert"></div>')
+                .text(message)
+                .append('<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>');
+            $('#ajaxAlerts').empty().append($alert);
+        }
+
+        function postSelection(url, extra) {
+            return $.ajax({
+                url: url,
+                method: 'POST',
+                data: Object.assign({ ids: Array.from(selectedIds) }, extra || {}),
+                headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') }
+            });
+        }
+
+        $('#syncSelectedBtn').on('click', function () {
+            if (selectedIds.size === 0) { return; }
+            postSelection('{{ route('attendance.sync-selected') }}')
+                .done(function (res) {
+                    showAlert('success', res.message);
+                    selectedIds.clear();
+                    table.ajax.reload(null, false);
+                })
+                .fail(function (xhr) { showAlert('danger', xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Sync failed.'); });
+        });
+
+        $('#excludeSelectedBtn').on('click', function () {
+            if (selectedIds.size === 0) { return; }
+            postSelection('{{ route('attendance.exclude') }}', { excluded: 1 })
+                .done(function (res) {
+                    showAlert('success', res.message);
+                    selectedIds.clear();
+                    table.ajax.reload(null, false);
+                })
+                .fail(function (xhr) { showAlert('danger', xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Exclude failed.'); });
+        });
+
+        $('#includeSelectedBtn').on('click', function () {
+            if (selectedIds.size === 0) { return; }
+            postSelection('{{ route('attendance.exclude') }}', { excluded: 0 })
+                .done(function (res) {
+                    showAlert('success', res.message);
+                    selectedIds.clear();
+                    table.ajax.reload(null, false);
+                })
+                .fail(function (xhr) { showAlert('danger', xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Include failed.'); });
+        });
+
+        $('#deleteSelectedBtn').on('click', function () {
+            if (selectedIds.size === 0) { return; }
+            var count = selectedIds.size;
+            if (!confirm('Delete ' + count + ' punch(es)? This cannot be undone. Punches already synced to payroll will only be removed from ADMS — payroll keeps its own copy.')) {
+                return;
+            }
+            postSelection('{{ route('attendance.delete') }}')
+                .done(function (res) {
+                    showAlert('success', res.message);
+                    selectedIds.clear();
+                    table.ajax.reload(null, false);
+                })
+                .fail(function (xhr) { showAlert('danger', xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Delete failed.'); });
         });
     });
 </script>

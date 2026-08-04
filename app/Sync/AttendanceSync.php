@@ -17,9 +17,7 @@ use App\Models\EmployeeMap;
  */
 class AttendanceSync
 {
-    public function __construct(private PayrollClient $payroll)
-    {
-    }
+    public function __construct(private PayrollClient $payroll) {}
 
     /**
      * Drain all currently-pending punches, pushing them in batches.
@@ -40,6 +38,10 @@ class AttendanceSync
 
         while (true) {
             $pending = Attendance::where('is_sync', false)
+                // Manually skipped from the Attendance screen — left out of the
+                // automatic/scheduled drain on purpose. syncIds() below still lets
+                // an operator hand-pick one of these and push it anyway.
+                ->where('sync_excluded', false)
                 ->where('id', '>', $lastId)
                 ->orderBy('id')
                 ->limit($batchSize)
@@ -56,15 +58,49 @@ class AttendanceSync
         }
     }
 
+    /**
+     * Push a specific, operator-picked set of punches (the "sync selected" action
+     * on the Attendance screen). Unlike sync(), this intentionally ignores
+     * sync_excluded — hand-picking a punch is an explicit override of a standing
+     * "skip" mark. Already-synced ids are silently ignored.
+     */
+    /** @return array{synced:int, failed:int} */
+    public function syncIds(array $ids, int $batchSize = 50): array
+    {
+        $synced = 0;
+        $failed = 0;
+
+        $pending = Attendance::whereIn('id', $ids)
+            ->where('is_sync', false)
+            ->orderBy('id')
+            ->get();
+
+        foreach ($pending->chunk($batchSize) as $chunk) {
+            $result = $this->pushBatch($chunk);
+            $synced += $result['synced'];
+            $failed += $result['failed'];
+        }
+
+        return ['synced' => $synced, 'failed' => $failed];
+    }
+
     /** @return array{synced:int, failed:int} */
     private function pushBatch($pending): array
     {
         $logs = [];
+        // Punches we reject before they ever reach payroll still count as failures —
+        // otherwise a batch where every row is unmapped reports "0 failed" and the
+        // caller (the command's log line, the "Sync selected" notice) stays silent
+        // about work that didn't happen.
+        $localFailures = 0;
+
         foreach ($pending as $attendance) {
             // IN/OUT was frozen onto the punch at arrival from the device's
             // direction; a null means the device had no direction set then.
             if ($attendance->log_type === null) {
                 $this->flag($attendance, "Device {$attendance->sn} had no IN/OUT direction when this punch was recorded.");
+                $localFailures++;
+
                 continue;
             }
 
@@ -73,6 +109,8 @@ class AttendanceSync
                 ->value('payroll_employee_id');
             if ($payrollId === null) {
                 $this->flag($attendance, "No employee mapping for device PIN {$attendance->employee_id}.");
+                $localFailures++;
+
                 continue;
             }
 
@@ -87,7 +125,7 @@ class AttendanceSync
         }
 
         if (empty($logs)) {
-            return ['synced' => 0, 'failed' => 0];
+            return ['synced' => 0, 'failed' => $localFailures];
         }
 
         $result = $this->payroll->pushLogs($logs);
@@ -97,6 +135,10 @@ class AttendanceSync
                 'is_sync' => true,
                 'sync_time' => now(),
                 'sync_error' => null,
+                // syncIds() can hand-pick a punch carrying a standing "skip" mark.
+                // Once it's actually synced the mark no longer applies — clearing it
+                // keeps sync_excluded meaningful only for unsynced rows.
+                'sync_excluded' => false,
             ]);
         }
 
@@ -107,7 +149,10 @@ class AttendanceSync
             }
         }
 
-        return ['synced' => count($result->syncedLocalIds), 'failed' => count($result->failures)];
+        return [
+            'synced' => count($result->syncedLocalIds),
+            'failed' => $localFailures + count($result->failures),
+        ];
     }
 
     private function flag(Attendance $attendance, string $reason): void
@@ -115,4 +160,3 @@ class AttendanceSync
         $attendance->forceFill(['sync_error' => $reason])->save();
     }
 }
-

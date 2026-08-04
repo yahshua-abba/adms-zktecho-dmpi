@@ -6,6 +6,7 @@ use App\Models\Attendance;
 use App\Models\Device;
 use App\Models\EmployeeMap;
 use App\Queries\DashboardStats;
+use App\Support\PerPage;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -48,5 +49,22 @@ class DashboardStatsTest extends TestCase
         $this->assertSame(2, $summary['pending_count']);   // pending + the unmapped (both is_sync=false, no error)
         $this->assertSame(1, $summary['failed_count']);
         $this->assertSame(1, $summary['unmapped_count']);  // PIN 9999
+    }
+
+    public function test_unmapped_count_spans_every_page_not_just_the_first(): void
+    {
+        Carbon::setTestNow('2026-06-17 10:00:00');
+
+        // unmappedPins() is paginated, so a count() of the returned page would stop
+        // at PerPage::DEFAULT and under-report the enrollment gap on the dashboard.
+        $gaps = PerPage::DEFAULT + 7;
+        for ($i = 0; $i < $gaps; $i++) {
+            Attendance::create([
+                'sn' => 'A', 'table' => 'ATTLOG', 'stamp' => '1',
+                'employee_id' => '5_'.(9000 + $i), 'timestamp' => now(), 'is_sync' => false,
+            ]);
+        }
+
+        $this->assertSame($gaps, DashboardStats::summary()['unmapped_count']);
     }
 }

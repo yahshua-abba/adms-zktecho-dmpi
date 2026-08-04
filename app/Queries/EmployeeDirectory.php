@@ -6,13 +6,18 @@ use App\Models\Attendance;
 use App\Models\Device;
 use App\Models\DeviceAssignment;
 use App\Models\EmployeeMap;
+use App\Support\PerPage;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
 
 /**
  * The Employees screen's data: the mapped roster (employee_map, with each
  * person's last punch) and the "unmapped device PINs" list — PINs that have
  * tapped but have no payroll mapping yet, i.e. enrollment gaps to fix.
+ *
+ * Both lists are paginated (see App\Support\PerPage for the shared page-size
+ * options) — each with its own page/per-page query param name since the two
+ * tables render on the same page.
  */
 class EmployeeDirectory
 {
@@ -25,7 +30,7 @@ class EmployeeDirectory
      *                           payroll id, or an enrolled device's serial/name/code
      * @param  ?string  $device  a physical device serial (no_sn) to filter by
      */
-    public static function mapped(?string $search = null, ?string $device = null): Collection
+    public static function mapped(?string $search = null, ?string $device = null, int $perPage = PerPage::DEFAULT): LengthAwarePaginator
     {
         $query = EmployeeMap::query()
             ->select('employee_map.*')
@@ -67,7 +72,7 @@ class EmployeeDirectory
             });
         }
 
-        $employees = $query->orderBy('name')->get();
+        $employees = $query->orderBy('name')->paginate($perPage, ['*'], 'mapped_page');
 
         // Resolve each employee's assigned payroll-device codes to the physical
         // device(s) (serial + name) linked to them. Done in PHP to stay cross-DB.
@@ -100,13 +105,13 @@ class EmployeeDirectory
     }
 
     /** Device PINs seen in attendances that have no employee_map row. */
-    public static function unmappedPins(): Collection
+    public static function unmappedPins(int $perPage = PerPage::DEFAULT): LengthAwarePaginator
     {
         return Attendance::query()
             ->whereNotIn('employee_id', EmployeeMap::pluck('device_pin'))
             ->selectRaw('employee_id, count(*) as punch_count, max(timestamp) as last_punch_at')
             ->groupBy('employee_id')
             ->orderByRaw('max(timestamp) desc')
-            ->get();
+            ->paginate($perPage, ['*'], 'unmapped_page');
     }
 }

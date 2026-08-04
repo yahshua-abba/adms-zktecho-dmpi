@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\PayrollClient;
 use App\Models\Attendance;
 use App\Models\Device;
 use App\Models\EmployeeMap;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\FakePayrollClient;
 use Tests\TestCase;
 
 class AttendanceScreenTest extends TestCase
@@ -50,7 +52,7 @@ class AttendanceScreenTest extends TestCase
 
     public function test_sync_now_button_pushes_pending_punches(): void
     {
-        $this->app->instance(\App\Contracts\PayrollClient::class, $fake = new \Tests\Support\FakePayrollClient());
+        $this->app->instance(PayrollClient::class, $fake = new FakePayrollClient);
         Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
         EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'X']);
         $punch = $this->punch(['employee_id' => '5_4968', 'is_sync' => false]);
@@ -61,9 +63,93 @@ class AttendanceScreenTest extends TestCase
         $this->assertCount(1, $fake->pushed);
     }
 
+    public function test_sync_selected_pushes_only_the_chosen_punches(): void
+    {
+        $this->app->instance(PayrollClient::class, $fake = new FakePayrollClient);
+        Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
+        EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'X']);
+        $picked = $this->punch(['employee_id' => '5_4968', 'is_sync' => false]);
+        $notPicked = $this->punch(['employee_id' => '5_4968', 'is_sync' => false]);
+
+        $response = $this->postJson('/attendance/sync-selected', ['ids' => [$picked->id]]);
+
+        $response->assertOk();
+        $this->assertTrue($picked->fresh()->is_sync);
+        $this->assertFalse($notPicked->fresh()->is_sync);
+        $this->assertCount(1, $fake->pushed);
+    }
+
+    public function test_exclude_marks_selected_punches_skipped_and_include_reverses_it(): void
+    {
+        $punch = $this->punch(['is_sync' => false]);
+
+        $this->postJson('/attendance/exclude', ['ids' => [$punch->id], 'excluded' => 1])->assertOk();
+        $this->assertTrue($punch->fresh()->sync_excluded);
+
+        $this->postJson('/attendance/exclude', ['ids' => [$punch->id], 'excluded' => 0])->assertOk();
+        $this->assertFalse($punch->fresh()->sync_excluded);
+    }
+
+    public function test_exclude_leaves_already_synced_punches_untouched(): void
+    {
+        // sync_excluded only ever applies to unsynced rows. A selection that mixes
+        // pending and synced punches must not leave a synced row marked "skipped".
+        $pending = $this->punch(['is_sync' => false]);
+        $synced = $this->punch(['is_sync' => true, 'timestamp' => '2026-06-17 09:00:00']);
+
+        $response = $this->postJson('/attendance/exclude', [
+            'ids' => [$pending->id, $synced->id], 'excluded' => 1,
+        ])->assertOk();
+
+        $this->assertTrue($pending->fresh()->sync_excluded);
+        $this->assertFalse($synced->fresh()->sync_excluded);
+        $this->assertStringContainsString('1 already-synced', $response->json('message'));
+    }
+
+    public function test_excluded_punches_are_skipped_by_the_scheduled_sync_button(): void
+    {
+        $this->app->instance(PayrollClient::class, $fake = new FakePayrollClient);
+        Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
+        EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'X']);
+        $punch = $this->punch(['employee_id' => '5_4968', 'is_sync' => false, 'sync_excluded' => true]);
+
+        $this->post('/attendance/sync');
+
+        $this->assertFalse($punch->fresh()->is_sync);
+        $this->assertCount(0, $fake->pushed);
+    }
+
+    public function test_delete_selected_removes_the_chosen_punches(): void
+    {
+        $toDelete = $this->punch();
+        $toKeep = $this->punch();
+
+        $response = $this->postJson('/attendance/delete', ['ids' => [$toDelete->id]]);
+
+        $response->assertOk();
+        $this->assertModelMissing($toDelete);
+        $this->assertModelExists($toKeep);
+    }
+
+    public function test_delete_selected_allows_removing_already_synced_punches(): void
+    {
+        $synced = $this->punch(['is_sync' => true]);
+
+        $this->postJson('/attendance/delete', ['ids' => [$synced->id]])->assertOk();
+
+        $this->assertModelMissing($synced);
+    }
+
+    public function test_bulk_endpoints_require_at_least_one_id(): void
+    {
+        $this->postJson('/attendance/sync-selected', ['ids' => []])->assertStatus(422);
+        $this->postJson('/attendance/exclude', ['ids' => []])->assertStatus(422);
+        $this->postJson('/attendance/delete', ['ids' => []])->assertStatus(422);
+    }
+
     public function test_ajax_includes_device_details_inout_punched_received_and_synced(): void
     {
-        \App\Models\Device::create(['no_sn' => 'DEV-IN', 'nama' => 'Admin IN', 'lokasi' => 'BUGO - Admin', 'direction' => 'in']);
+        Device::create(['no_sn' => 'DEV-IN', 'nama' => 'Admin IN', 'lokasi' => 'BUGO - Admin', 'direction' => 'in']);
         $this->punch(['sn' => 'DEV-IN', 'status1' => 0, 'timestamp' => '2026-06-18 08:00:00', 'is_sync' => true, 'sync_time' => '2026-06-18 11:00:00']);
 
         $response = $this->get(
@@ -82,9 +168,22 @@ class AttendanceScreenTest extends TestCase
         $this->assertStringContainsString('synced', $row['sync_status']);          // status badge only
     }
 
+    public function test_ajax_shows_skipped_badge_for_excluded_punches(): void
+    {
+        Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
+        $this->punch(['sn' => 'DEV-IN', 'is_sync' => false, 'sync_excluded' => true]);
+
+        $row = $this->get(
+            route('devices.Attendance', ['draw' => 1, 'start' => 0, 'length' => 100]),
+            ['X-Requested-With' => 'XMLHttpRequest']
+        )->json('data.0');
+
+        $this->assertStringContainsString('skipped', $row['sync_status']);
+    }
+
     public function test_ajax_unsynced_punch_shows_dash_for_synced_at(): void
     {
-        \App\Models\Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
+        Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
         $this->punch(['sn' => 'DEV-IN', 'is_sync' => false]);
 
         $row = $this->get(
@@ -98,7 +197,7 @@ class AttendanceScreenTest extends TestCase
 
     public function test_ajax_inout_displays_the_frozen_log_type(): void
     {
-        \App\Models\Device::create(['no_sn' => 'DEV-BOTH', 'direction' => 'both']);
+        Device::create(['no_sn' => 'DEV-BOTH', 'direction' => 'both']);
         $this->punch(['sn' => 'DEV-BOTH', 'status1' => 1, 'log_type' => 'out']);
 
         $response = $this->get(

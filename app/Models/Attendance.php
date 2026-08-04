@@ -22,6 +22,7 @@ class Attendance extends Model
         'status5',
         'log_type',
         'is_sync',
+        'sync_excluded',
         'sync_id',
         'sync_time',
         'sync_error',
@@ -35,6 +36,7 @@ class Attendance extends Model
         'status4' => 'boolean',
         'status5' => 'boolean',
         'is_sync' => 'boolean',
+        'sync_excluded' => 'boolean',
         'sync_time' => 'datetime',
     ];
 }

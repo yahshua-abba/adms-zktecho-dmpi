@@ -1,0 +1,150 @@
+// ---------------------------------------------------------------------------
+// Shared surfaces and table styling.
+//
+// These class names (.stat-card, .filter-bar, .table-card, .status-badge) were
+// introduced by the inline <style> block in layouts/app.blade.php and are used
+// across the views, so they're kept verbatim — just compiled now, and sharing
+// one definition of "panel" with Bootstrap's own .card.
+// ---------------------------------------------------------------------------
+
+%app-panel {
+    background-color: $app-surface;
+    border: 0;
+    border-radius: $border-radius-lg;
+    box-shadow: $app-shadow-sm;
+}
+
+.stat-card {
+    @extend %app-panel;
+
+    .stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .stat-label {
+        color: $app-muted;
+        font-size: .8rem;
+        font-weight: 600;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+    }
+}
+
+.filter-bar {
+    @extend %app-panel;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.table-card {
+    @extend %app-panel;
+    padding: 1rem;
+}
+
+// --- Login page --------------------------------------------------------
+
+.login-shell {
+    min-height: 100vh;
+    padding: 1rem;
+    background-color: $app-bg;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 380px;
+    padding: 2rem;
+}
+
+.app-brand-static {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: $body-color;
+
+    .bi {
+        font-size: 1.5rem;
+        color: $primary;
+    }
+}
+
+// --- Tables ----------------------------------------------------------------
+
+.table {
+    margin-bottom: 0;
+
+    thead th {
+        color: $app-muted;
+        font-size: .78rem;
+        font-weight: 700;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+}
+
+// Status pills refreshed by the polling script on the Devices screen. The
+// script rewrites `className` wholesale, so the sizing has to live on the
+// class it always re-applies.
+.status-badge {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+// --- DataTables (1.13 + bootstrap5 theme) ----------------------------------
+
+.dataTables_wrapper {
+    .dataTables_length,
+    .dataTables_filter,
+    .dataTables_info,
+    .dataTables_paginate {
+        font-size: .8rem;
+        color: $app-muted;
+    }
+
+    .dataTables_length select,
+    .dataTables_filter input {
+        border-radius: $border-radius-sm;
+    }
+
+    // The theme's default top/bottom rows sit flush against the table. Some
+    // pages (Devices) use a custom `dom` string with plain <div class="top">/
+    // <div class="bottom"> instead of Bootstrap's `.row` — same fix, so those
+    // don't end up cramped with zero gap around the table.
+    .row:first-child,
+    > div.top {
+        margin-bottom: .75rem;
+    }
+
+    .row:last-child,
+    > div.bottom {
+        margin-top: .75rem;
+    }
+
+    // A custom "bottom" div has no Bootstrap `.row`/`.col` gutters, so the
+    // length/info/pagination pieces it groups together need their own gap.
+    > div.bottom {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: .5rem 1rem;
+
+        .dataTables_paginate {
+            margin-left: auto;
+        }
+    }
+
+    .page-link {
+        border: 0;
+        border-radius: $border-radius-sm;
+        font-weight: 600;
+    }
+
+    .dataTables_processing {
+        border-radius: $border-radius;
+        box-shadow: $app-shadow-md;
+    }
+}

@@ -1,7 +1,85 @@
-// Body
-$body-bg: #f8fafc;
+// ---------------------------------------------------------------------------
+// Design tokens.
+//
+// Two kinds of thing live here: our own tokens (prefixed `$app-`) and overrides
+// of Bootstrap's own variables. Bootstrap reads these via `!default`, so this
+// file MUST be imported before Bootstrap. Styling that isn't a Bootstrap knob
+// belongs in _layout.scss / _components.scss instead.
+// ---------------------------------------------------------------------------
 
-// Typography
-$font-family-sans-serif: 'Nunito', sans-serif;
-$font-size-base: 0.9rem;
-$line-height-base: 1.6;
+// --- Surfaces --------------------------------------------------------------
+
+// The page background was previously declared twice with different values
+// (#f8fafc here, #f6f8fa in an inline <style> that won, because this file was
+// never actually compiled). One token now.
+$app-bg:      #f6f8fa;
+$app-surface: #fff;
+$app-muted:   #667085;
+$app-border:  #e4e7ec;
+
+// The sidebar keeps its own dark palette independent of the page, which is why
+// these aren't expressed as Bootstrap theme colours.
+$app-sidebar-width:    248px;
+$app-sidebar-bg:       #101828;
+$app-sidebar-fg:       #cdd5df;
+$app-sidebar-fg-muted: #8c99ab;
+$app-sidebar-hover-bg: rgba(255, 255, 255, .07);
+
+$app-shadow-sm: 0 1px 3px rgba(16, 24, 40, .08);
+$app-shadow-md: 0 6px 16px rgba(16, 24, 40, .12);
+
+// --- Bootstrap overrides ---------------------------------------------------
+
+$body-bg:    $app-bg;
+$body-color: #1d2939;
+
+$font-family-sans-serif: 'DM Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+$font-size-base:       .9rem;
+$line-height-base:     1.6;
+$headings-font-weight: 700;
+
+// Indigo rather than Bootstrap's default #0d6efd — the one deliberate colour
+// change. Success/danger/warning stay stock so status badges keep their meaning.
+$primary: #4f46e5;
+
+$border-radius:    .5rem;
+$border-radius-sm: .375rem;
+$border-radius-lg: .75rem;
+$border-radius-xl: 1rem;
+
+// Cards carry a shadow instead of a border — what the old inline .stat-card /
+// .table-card rules were reaching for, now applied to every card.
+$card-border-width:  0;
+$card-border-radius: $border-radius-lg;
+$card-box-shadow:    $app-shadow-sm;
+$card-cap-bg:        transparent;
+$card-spacer-y:      1.15rem;
+$card-spacer-x:      1.25rem;
+
+$table-border-color:   $app-border;
+$table-cell-padding-y: .6rem;
+$table-striped-bg:     rgba(16, 24, 40, .02);
+$table-hover-bg:       rgba(79, 70, 229, .04);
+
+$input-border-color:       $app-border;
+$input-btn-focus-width:    .2rem;
+$form-label-font-size:     .8rem;
+$form-label-font-weight:   600;
+$form-label-margin-bottom: .35rem;
+
+$btn-font-weight: 600;
+
+$badge-font-weight: 600;
+$badge-padding-y:   .38em;
+$badge-padding-x:   .65em;
+
+$dropdown-border-width:   0;
+$dropdown-border-radius:  $border-radius-lg;
+$dropdown-box-shadow:     $app-shadow-md;
+$dropdown-padding-y:      .4rem;
+$dropdown-item-padding-y: .45rem;
+
+$nav-link-font-weight: 600;
+
+$alert-border-width:  0;
+$alert-border-radius: $border-radius-lg;

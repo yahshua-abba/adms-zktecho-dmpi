@@ -6,6 +6,7 @@ use App\Models\Attendance;
 use App\Models\Device;
 use App\Models\EmployeeMap;
 use App\Sync\AttendanceSync;
+use App\Sync\PushResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\FakePayrollClient;
 use Tests\TestCase;
@@ -33,7 +34,7 @@ class AttendanceSyncTest extends TestCase
             'is_sync' => false,
         ]);
 
-        $payroll = new FakePayrollClient();
+        $payroll = new FakePayrollClient;
         (new AttendanceSync($payroll))->sync();
 
         $this->assertCount(1, $payroll->pushed);
@@ -59,7 +60,7 @@ class AttendanceSyncTest extends TestCase
         Attendance::create(['sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1', 'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00', 'log_type' => 'in', 'is_sync' => false]);
         Attendance::create(['sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1', 'employee_id' => '7_4968', 'timestamp' => '2026-06-17 08:01:00', 'log_type' => 'in', 'is_sync' => false]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $this->assertSame([48213, 70001], array_map(fn ($l) => $l->employee, $payroll->pushed));
     }
@@ -72,7 +73,7 @@ class AttendanceSyncTest extends TestCase
         $in = Attendance::create(['sn' => 'DEV-BOTH', 'table' => 'ATTLOG', 'stamp' => '1', 'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00', 'log_type' => 'in', 'is_sync' => false]);
         $out = Attendance::create(['sn' => 'DEV-BOTH', 'table' => 'ATTLOG', 'stamp' => '1', 'employee_id' => '5_4968', 'timestamp' => '2026-06-17 17:00:00', 'log_type' => 'out', 'is_sync' => false]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $byId = collect($payroll->pushed)->keyBy('localId');
         $this->assertSame('in', $byId[$in->id]->logType);
@@ -88,7 +89,7 @@ class AttendanceSyncTest extends TestCase
 
         // Operator flips the device to OUT before the punch syncs.
         $device->update(['direction' => 'out']);
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $this->assertSame('in', $payroll->pushed[0]->logType);
     }
@@ -101,7 +102,7 @@ class AttendanceSyncTest extends TestCase
             'employee_id' => '5_9999', 'timestamp' => '2026-06-17 08:01:33', 'log_type' => 'in', 'is_sync' => false,
         ]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $this->assertCount(0, $payroll->pushed);
         $attendance->refresh();
@@ -120,7 +121,7 @@ class AttendanceSyncTest extends TestCase
             'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:01:33', 'log_type' => null, 'is_sync' => false,
         ]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $this->assertCount(0, $payroll->pushed);
         $attendance->refresh();
@@ -137,8 +138,8 @@ class AttendanceSyncTest extends TestCase
             'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:01:33', 'log_type' => 'in', 'is_sync' => false,
         ]);
 
-        $payroll = new FakePayrollClient();
-        $payroll->nextResult = new \App\Sync\PushResult(
+        $payroll = new FakePayrollClient;
+        $payroll->nextResult = new PushResult(
             syncedLocalIds: [],
             failures: [['localId' => $attendance->id, 'errorCode' => 2, 'reason' => 'No Employee']],
         );
@@ -158,7 +159,7 @@ class AttendanceSyncTest extends TestCase
             'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:01:33', 'is_sync' => true,
         ]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $this->assertCount(0, $payroll->pushed);
     }
@@ -174,7 +175,7 @@ class AttendanceSyncTest extends TestCase
             ]);
         }
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync(2);
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync(2);
 
         $this->assertCount(5, $payroll->pushed);
         $this->assertSame(5, Attendance::where('is_sync', true)->count());
@@ -193,12 +194,101 @@ class AttendanceSyncTest extends TestCase
             'employee_id' => '5_9999', 'timestamp' => '2026-06-17 08:01:00', 'log_type' => 'in', 'is_sync' => false,
         ]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync(1);
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync(1);
 
         $this->assertTrue($mapped->fresh()->is_sync);
         $this->assertFalse($unmapped->fresh()->is_sync);
         $this->assertNotNull($unmapped->fresh()->sync_error);
         $this->assertCount(1, $payroll->pushed);
+    }
+
+    public function test_sync_skips_punches_manually_excluded(): void
+    {
+        Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
+        $this->map(['device_pin' => '5_4968', 'payroll_employee_id' => 48213]);
+        $excluded = Attendance::create([
+            'sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00', 'log_type' => 'in',
+            'is_sync' => false, 'sync_excluded' => true,
+        ]);
+
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
+
+        $this->assertCount(0, $payroll->pushed);
+        $this->assertFalse($excluded->fresh()->is_sync);
+    }
+
+    public function test_sync_ids_pushes_a_hand_picked_punch_even_if_excluded(): void
+    {
+        Device::create(['no_sn' => 'DEV-IN', 'direction' => 'in']);
+        $this->map(['device_pin' => '5_4968', 'payroll_employee_id' => 48213]);
+        $excluded = Attendance::create([
+            'sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00', 'log_type' => 'in',
+            'is_sync' => false, 'sync_excluded' => true,
+        ]);
+        $other = Attendance::create([
+            'sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:01:00', 'log_type' => 'in', 'is_sync' => false,
+        ]);
+
+        $result = (new AttendanceSync($payroll = new FakePayrollClient))->syncIds([$excluded->id]);
+
+        $this->assertSame(['synced' => 1, 'failed' => 0], $result);
+        $this->assertCount(1, $payroll->pushed);
+        $this->assertTrue($excluded->fresh()->is_sync);
+        $this->assertFalse($other->fresh()->is_sync);
+
+        // The "skip" mark only ever applies to unsynced rows, so pushing a
+        // hand-picked excluded punch has to clear it rather than leave the row
+        // sitting at is_sync=true alongside sync_excluded=true.
+        $this->assertFalse($excluded->fresh()->sync_excluded);
+    }
+
+    public function test_locally_rejected_punches_are_reported_as_failures(): void
+    {
+        // No device direction => log_type null; and no employee_map row for the PIN.
+        // Neither punch ever reaches payroll, but both are real failures the caller
+        // has to hear about — a silent "0 failed" reads as "nothing to do".
+        Device::create(['no_sn' => 'DEV-NONE']);
+        $this->map(['device_pin' => '5_4968', 'payroll_employee_id' => 48213]);
+
+        $noDirection = Attendance::create([
+            'sn' => 'DEV-NONE', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00',
+            'log_type' => null, 'is_sync' => false,
+        ]);
+        $unmapped = Attendance::create([
+            'sn' => 'DEV-NONE', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_0000', 'timestamp' => '2026-06-17 08:01:00',
+            'log_type' => 'in', 'is_sync' => false,
+        ]);
+
+        $sync = new AttendanceSync($payroll = new FakePayrollClient);
+
+        $this->assertSame(['synced' => 0, 'failed' => 2], $sync->sync());
+        $this->assertCount(0, $payroll->pushed);
+        $this->assertNotNull($noDirection->fresh()->sync_error);
+        $this->assertNotNull($unmapped->fresh()->sync_error);
+
+        // Same accounting through the hand-picked path.
+        $this->assertSame(
+            ['synced' => 0, 'failed' => 2],
+            $sync->syncIds([$noDirection->id, $unmapped->id])
+        );
+    }
+
+    public function test_sync_ids_ignores_ids_already_synced(): void
+    {
+        $already = Attendance::create([
+            'sn' => 'DEV-IN', 'table' => 'ATTLOG', 'stamp' => '1',
+            'employee_id' => '5_4968', 'timestamp' => '2026-06-17 08:00:00', 'is_sync' => true,
+        ]);
+
+        $result = (new AttendanceSync($payroll = new FakePayrollClient))->syncIds([$already->id]);
+
+        $this->assertSame(['synced' => 0, 'failed' => 0], $result);
+        $this->assertCount(0, $payroll->pushed);
     }
 
     public function test_pushes_multiple_punches_in_one_batch(): void
@@ -216,7 +306,7 @@ class AttendanceSyncTest extends TestCase
             'employee_id' => '5_9343', 'timestamp' => '2026-06-17 17:05:00', 'log_type' => 'out', 'is_sync' => false,
         ]);
 
-        (new AttendanceSync($payroll = new FakePayrollClient()))->sync();
+        (new AttendanceSync($payroll = new FakePayrollClient))->sync();
 
         $this->assertCount(2, $payroll->pushed);
         $this->assertSame(['in', 'out'], array_map(fn ($l) => $l->logType, $payroll->pushed));

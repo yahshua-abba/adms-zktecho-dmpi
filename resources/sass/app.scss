@@ -1,8 +1,18 @@
-// Fonts
-@import url('https://fonts.bunny.net/css?family=Nunito');
+// ---------------------------------------------------------------------------
+// ADMS dashboard stylesheet.
+//
+// Everything is bundled by Vite — nothing is fetched from a CDN at runtime, so
+// the dashboard renders correctly on a device LAN with no internet access.
+// Third-party CSS that ships assets alongside it (the icon font, the DM Sans
+// webfont, the DataTables theme) is imported from resources/js/app.js instead,
+// so Vite rewrites those asset URLs for us.
+// ---------------------------------------------------------------------------
 
-// Variables
+// Tokens and Bootstrap overrides — must come first.
 @import 'variables';
 
-// Bootstrap
 @import 'bootstrap/scss/bootstrap';
+
+// Our own styling, after Bootstrap so it can override and use its mixins.
+@import 'layout';
+@import 'components';

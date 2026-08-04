@@ -1,0 +1,141 @@
+// ---------------------------------------------------------------------------
+// The app shell: sidebar + sticky topbar + content column.
+//
+// The sidebar is a Bootstrap *responsive* offcanvas (`.offcanvas-lg`): a slide-in
+// drawer below lg, a static column at lg and up. That's why there's no custom
+// toggle JS — Bootstrap's data-api handles it.
+// ---------------------------------------------------------------------------
+
+.app-shell {
+    display: flex;
+    align-items: flex-start;
+    min-height: 100vh;
+}
+
+.app-sidebar {
+    // Feed Bootstrap's own offcanvas width variable so the drawer and the static
+    // column are the same width without fighting its stylesheet.
+    --bs-offcanvas-width: #{$app-sidebar-width};
+
+    @include media-breakpoint-up(lg) {
+        position: sticky;
+        top: 0;
+        flex: 0 0 $app-sidebar-width;
+        width: $app-sidebar-width;
+        height: 100vh;
+    }
+}
+
+// The visible surface lives on an inner element on purpose: at lg and up
+// Bootstrap forces `background-color: transparent !important` onto
+// `.offcanvas-lg`, which would strip the sidebar's colour on desktop.
+.app-sidebar-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 1rem .75rem;
+    background-color: $app-sidebar-bg;
+    color: $app-sidebar-fg;
+}
+
+.app-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .25rem .5rem 1.25rem;
+}
+
+.app-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 700;
+    text-decoration: none;
+
+    &:hover,
+    &:focus {
+        color: #fff;
+    }
+
+    .bi {
+        font-size: 1.25rem;
+        color: tint-color($primary, 30%);
+    }
+}
+
+.app-nav {
+    flex: 1 1 auto;
+    overflow-y: auto;
+
+    .nav-link {
+        display: flex;
+        align-items: center;
+        gap: .625rem;
+        padding: .5rem .75rem;
+        margin-bottom: .125rem;
+        border-radius: $border-radius;
+        color: $app-sidebar-fg;
+
+        &:hover,
+        &:focus {
+            background-color: $app-sidebar-hover-bg;
+            color: #fff;
+        }
+
+        &.active {
+            background-color: $primary;
+            color: #fff;
+        }
+
+        .bi {
+            flex: 0 0 1rem;
+            font-size: 1rem;
+        }
+    }
+}
+
+.app-nav-heading {
+    padding: 1.25rem .75rem .4rem;
+    color: $app-sidebar-fg-muted;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.app-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    // Without this, a wide table stretches the flex item and pushes the sidebar
+    // off screen instead of scrolling inside the content column.
+    min-width: 0;
+}
+
+.app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 1020;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .625rem 1rem;
+    background-color: rgba(255, 255, 255, .85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid $app-border;
+
+    @include media-breakpoint-up(lg) {
+        padding-inline: 1.75rem;
+    }
+}
+
+.app-content {
+    padding: 1.5rem 1rem 3rem;
+
+    @include media-breakpoint-up(lg) {
+        padding: 1.75rem 1.75rem 3.5rem;
+    }
+}

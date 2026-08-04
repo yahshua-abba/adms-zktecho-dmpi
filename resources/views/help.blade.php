@@ -32,7 +32,13 @@
     </div>
 
     <div class="col-lg-9">
-        <h2 class="mb-4">Help &amp; Tutorial</h2>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+            <h2 class="mb-0">Help &amp; Tutorial</h2>
+            <button type="button" id="copyToLlmBtn" class="btn btn-outline-primary btn-sm"
+                    title="Copy this whole page as text so you can paste it into Claude, ChatGPT, or Gemini and ask a question">
+                <i class="bi bi-clipboard"></i> Copy to LLM
+            </button>
+        </div>
 
         {{-- 1 --}}
         <section id="overview" class="help-card help-section">
@@ -112,7 +118,7 @@
                 <tr><th>Monitoring</th><td>The single "is everything OK?" page (the old <em>Dashboard</em> and <em>Health</em> are now merged here, and both redirect to it). Shows an overall status banner, <strong>At a glance</strong> stat cards (devices online/offline, punches today, pending/failed sync, unmapped PINs), and a <strong>System health</strong> grid of checks (database, scheduler, payroll credentials, DMPI reachable, sync backlog, roster, devices, recent errors). Each health card is clickable to the underlying data. Auto-refreshes every 30s and has the <strong>Start scheduler</strong> button.</td></tr>
                 <tr><th>Devices</th><td>Each device's online status, name/location, IN/OUT direction, and which DMPI device it's linked to. Set direction + link here, and use <strong>Sync enrollments</strong> to push users to a device.</td></tr>
                 <tr><th>Employees</th><td>Two tabs: <strong>Mapped</strong> — the roster (name, company, CHAPA, device PIN, <strong>RFID card</strong>, payroll id, and the <strong>physical device serial(s)</strong> each person is enrolled on); searchable across <em>every</em> column and filterable by enrolled device. <strong>Unmapped PINs</strong> — people tapping who aren't matched to an employee yet. The <strong>Sync from DMPI</strong> button lives here.</td></tr>
-                <tr><th>Attendance</th><td>Every punch with employee details, device + location, and its full lifecycle as three time columns — <strong>Punched</strong> (at the device), <strong>Received</strong> (by ADMS), <strong>Synced</strong> (to payroll) — plus a sync-status badge. IN/OUT is shown read-only. Filter by date/device/company/employee/sync. <strong>Sync to payroll now</strong> pushes pending punches on demand.</td></tr>
+                <tr><th>Attendance</th><td>Every punch with employee details, device + location, and its full lifecycle as three time columns — <strong>Punched</strong> (at the device), <strong>Received</strong> (by ADMS), <strong>Synced</strong> (to payroll) — plus a sync-status badge (synced/pending/failed/<strong>skipped</strong>). IN/OUT is shown read-only. Filter by date/device/company/employee/sync. <strong>Sync to payroll now</strong> pushes all pending punches on demand. Tick rows to open a selection toolbar — selections persist as you page through — with <strong>Sync selected</strong> (push just those, even ones marked skipped), <strong>Exclude from sync</strong>/<strong>Include in sync</strong> (mark punches so the automatic sync leaves them alone, e.g. a known bad tap you don't want going to payroll yet), and <strong>Delete selected</strong> (permanently removes the local record — payroll keeps whatever it already received).</td></tr>
                 <tr><th>Logs ▾ → Server Activity</th><td>What ADMS itself is doing (sync runs, pulls, reconciles, errors). See section 8.</td></tr>
                 <tr><th>Logs ▾ → Device Check-ins</th><td>When each device connected and reported its settings — useful to confirm a device is reaching the server. (Was "Device Log".) Auto-pruned after 30 days.</td></tr>
                 <tr><th>Logs ▾ → Device Messages</th><td>Everything a device sends — attendance taps and on-device activity (menu/settings) — with a plain-language "What happened" column and the raw payload tucked into "Technical details". (Was "Finger Log".) Auto-pruned after 30 days.</td></tr>
@@ -153,9 +159,18 @@
             <h3>6. Setup tutorial</h3>
             <ol>
                 <li><strong>Connect ADMS to DMPI.</strong> Set <code>PAYROLL_URL</code>, <code>PAYROLL_USERNAME</code>, <code>PAYROLL_PASSWORD</code> in <code>.env</code> (a timekeeper-access service account). User-Agent must be <code>YP_TIMEKEEPER</code>.</li>
+                <li>
+                    <strong>Set the device up in DMPI first (superadmin only).</strong> A device has to exist in DMPI before ADMS has anything to pull. This screen isn't on a normal company account — it only appears after logging into DMPI as the <strong>superadmin</strong> user, which swaps in a separate superadmin menu.
+                    <ol type="a" class="mt-2">
+                        <li>Log into DMPI as superadmin → in the superadmin menu, click <strong>Devices</strong>. This opens the <strong>Timekeeper Devices</strong> page.</li>
+                        <li>If the site/location doesn't already have one, click <strong>Device Location</strong> first and create one — <strong>Name</strong> + pick the company's <strong>Location</strong> (its existing site/branch). Devices are picked from this list, so the location has to exist before you can attach a device to it.</li>
+                        <li>Click <strong>Timekeeper Devices → Create</strong> and fill in: <strong>Device Name</strong>, <strong>Location</strong> (the one you just made), and <strong>Maximum No. of Employees</strong>. Save.</li>
+                    </ol>
+                    <p class="text-muted small mb-0 mt-2">Newly created devices are active immediately — there's no separate "publish" or "approve" step. Whichever company's credentials ADMS's <code>PAYROLL_*</code> service account uses determines which devices it's allowed to see, so the device's <strong>company</strong> has to match that account.</p>
+                </li>
                 <li><strong>Pull the data.</strong> Click <strong>Sync from DMPI</strong> on the Employees page (or run <code>php artisan payroll:sync-roster</code> + <code>payroll:sync-devices</code>, or let the scheduler do it). This fills Employees + the device dropdown.</li>
                 <li><strong>Point a device at ADMS.</strong> On the device's Cloud/ADMS setting, set the server to this machine's LAN IP. It auto-appears on the Devices page and shows <em>online</em>.</li>
-                <li><strong>Configure the device in ADMS.</strong> Set its <strong>Direction</strong> (IN/OUT/BOTH) and pick its matching <strong>Payroll device</strong> from the dropdown. Save.</li>
+                <li><strong>Configure the device in ADMS.</strong> Set its <strong>Direction</strong> (IN/OUT/BOTH) and pick its matching <strong>Timekeeper device</strong> from the dropdown. Save.</li>
                 <li><strong>Enroll.</strong> Click <strong>Sync enrollments</strong> → ADMS pushes the assigned employees (PIN + name + card) to the device.</li>
                 <li><strong>Verify.</strong> Tap a card → the punch appears on Attendance (pending → green <em>synced</em>) → confirm it in DMPI.</li>
                 <li><strong>Keep it running.</strong> The scheduler must be running for automatic sync (<code>php artisan schedule:work</code>, or the <strong>Start scheduler</strong> button on Monitoring). If the <em>Scheduler</em> health card ever goes red, click Start scheduler.</li>
@@ -330,10 +345,148 @@ php artisan config:cache route:cache
             <ul>
                 <li><strong>The scheduler must be running</strong> (cron or <code>schedule:work</code>) — without it, punches won't sync automatically (only via the manual button/command).</li>
                 <li><strong>Set the device clocks to the correct timezone</strong> — DMPI files punches by the device-stamped time.</li>
-                <li><strong>Security:</strong> the dashboard currently has no login. Add authentication before exposing it beyond a trusted network. The device endpoints (<code>/iclock/*</code>) are intentionally open + CSRF-exempt so devices can post.</li>
+                <li><strong>Security:</strong> the dashboard is behind a single login (username + password set via <code>ADMS_AUTH_USERNAME</code> / <code>ADMS_AUTH_PASSWORD</code> in <code>.env</code> — no users table). The device endpoints (<code>/iclock/*</code>) and <code>/healthz</code> are intentionally left open + CSRF-exempt so devices and uptime monitors can reach them without logging in.</li>
                 <li><strong>Remote dashboard access</strong> (optional): expose only the dashboard via a tunnel (e.g. Tailscale) — keep the device LAN traffic local.</li>
             </ul>
         </section>
     </div>
 </div>
+
+<script>
+    // Plain <script>, not the Vite bundle: it doesn't touch $, so it can run
+    // as soon as it's parsed instead of waiting on DOMContentLoaded.
+    (function () {
+        function collapse(str) {
+            return str.replace(/\s+/g, ' ').trim();
+        }
+
+        function listItemToText(li, ordered, index) {
+            var pre = li.querySelector('pre');
+            var prefix = ordered ? (index + 1) + '. ' : '- ';
+            if (!pre) {
+                return prefix + collapse(li.textContent);
+            }
+            var withoutPre = li.cloneNode(true);
+            var nestedPre = withoutPre.querySelector('pre');
+            nestedPre.parentNode.removeChild(nestedPre);
+            var label = collapse(withoutPre.textContent);
+            return prefix + label + '\n```\n' + pre.textContent.trim() + '\n```';
+        }
+
+        function tableToMarkdown(table) {
+            var lines = [];
+            var thead = table.querySelector('thead');
+            if (thead) {
+                var headRow = thead.querySelector('tr');
+                var headers = Array.prototype.map.call(headRow.children, function (th) {
+                    return collapse(th.textContent);
+                });
+                lines.push('| ' + headers.join(' | ') + ' |');
+                lines.push('| ' + headers.map(function () { return '---'; }).join(' | ') + ' |');
+            }
+            var body = table.querySelector('tbody') || table;
+            Array.prototype.forEach.call(body.querySelectorAll('tr'), function (tr) {
+                var cells = Array.prototype.map.call(tr.children, function (td) {
+                    return collapse(td.textContent);
+                });
+                lines.push('| ' + cells.join(' | ') + ' |');
+            });
+            return lines.join('\n');
+        }
+
+        function sectionToMarkdown(section) {
+            var parts = [];
+            Array.prototype.forEach.call(section.children, function (node) {
+                switch (node.tagName) {
+                    case 'H3':
+                        parts.push('## ' + collapse(node.textContent));
+                        break;
+                    case 'H5':
+                        parts.push('### ' + collapse(node.textContent));
+                        break;
+                    case 'H6':
+                        parts.push('#### ' + collapse(node.textContent));
+                        break;
+                    case 'P':
+                        parts.push(collapse(node.textContent));
+                        break;
+                    case 'UL':
+                    case 'OL':
+                        var ordered = node.tagName === 'OL';
+                        var items = Array.prototype.map.call(node.children, function (li, i) {
+                            return listItemToText(li, ordered, i);
+                        });
+                        parts.push(items.join('\n'));
+                        break;
+                    case 'TABLE':
+                        parts.push(tableToMarkdown(node));
+                        break;
+                    case 'PRE':
+                        parts.push('```\n' + node.textContent.trim() + '\n```');
+                        break;
+                    default:
+                        var text = collapse(node.textContent);
+                        if (text) parts.push(text);
+                }
+            });
+            return parts.join('\n\n');
+        }
+
+        function buildLlmExport() {
+            var sections = document.querySelectorAll('.help-section');
+            var body = Array.prototype.map.call(sections, sectionToMarkdown).join('\n\n');
+            return 'The following is the full help documentation for ADMS Server, an edge server that '
+                + 'bridges ZKTeco attendance devices to a payroll system. Use it as context for my question below.\n\n'
+                + '---\n\n' + body + '\n\n---\n\nMy question:\n';
+        }
+
+        function copyText(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            // execCommand reports failure by returning false rather than throwing.
+            // This is the path operators actually take — ADMS usually runs on plain
+            // HTTP over a LAN, so isSecureContext is false and the clipboard API
+            // above is unavailable — so a failed copy has to surface, not be
+            // swallowed into a "Copied!" that never happened.
+            var ok = false;
+            try {
+                ok = document.execCommand('copy');
+            } catch (e) {
+                ok = false;
+            }
+            document.body.removeChild(ta);
+            return ok ? Promise.resolve() : Promise.reject(new Error('Copy command was rejected by the browser.'));
+        }
+
+        var btn = document.getElementById('copyToLlmBtn');
+        if (!btn) return;
+        var defaultHtml = btn.innerHTML;
+        var resetTimer = null;
+
+        btn.addEventListener('click', function () {
+            copyText(buildLlmExport()).then(function () {
+                btn.innerHTML = '<i class="bi bi-check2"></i> Copied!';
+                btn.classList.remove('btn-outline-primary');
+                btn.classList.add('btn-success');
+            }, function () {
+                btn.innerHTML = '<i class="bi bi-x-lg"></i> Copy failed';
+                btn.classList.remove('btn-outline-primary');
+                btn.classList.add('btn-danger');
+            });
+            clearTimeout(resetTimer);
+            resetTimer = setTimeout(function () {
+                btn.innerHTML = defaultHtml;
+                btn.classList.remove('btn-success', 'btn-danger');
+                btn.classList.add('btn-outline-primary');
+            }, 2000);
+        });
+    })();
+</script>
 @endsection

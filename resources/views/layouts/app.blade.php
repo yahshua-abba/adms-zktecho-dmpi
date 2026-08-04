@@ -5,74 +5,108 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ADMS Server</title>
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.0.1/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.datatables.net/1.11.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <style>
-        body { background-color: #f6f8fa; }
-        .navbar-brand { font-weight: 600; }
-        .stat-card { border: none; border-radius: .75rem; box-shadow: 0 1px 3px rgba(16,24,40,.08); }
-        .stat-card .stat-value { font-size: 2rem; font-weight: 700; line-height: 1; }
-        .stat-card .stat-label { color: #667085; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
-        .filter-bar { background:#fff; border-radius:.75rem; box-shadow:0 1px 3px rgba(16,24,40,.08); padding:1rem; margin-bottom:1rem; }
-        .table-card { background:#fff; border-radius:.75rem; box-shadow:0 1px 3px rgba(16,24,40,.08); padding:1rem; }
-        .table thead th { font-size:.78rem; text-transform:uppercase; letter-spacing:.03em; color:#667085; }
-        @media (max-width: 991.98px) {
-            .navbar-collapse { position: fixed; top: 56px; left: -100%; padding: 15px; width: 75%; height: 100%;
-                background-color: #fff; transition: all 0.3s ease-in-out; z-index: 1000; }
-            .navbar-collapse.show { left: 0; }
-            body.menu-open { overflow: hidden; }
-            .navbar-toggler { z-index: 1001; }
-        }
-    </style>
+    @vite(['resources/js/app.js', 'resources/sass/app.scss'])
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="{{ route('monitoring') }}"><i class="bi bi-fingerprint"></i> ADMS Server</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    @php $r = Route::currentRouteName(); @endphp
-                    <li class="nav-item"><a class="nav-link {{ $r === 'monitoring' ? 'active' : '' }}" href="{{ route('monitoring') }}">Monitoring</a></li>
-                    <li class="nav-item"><a class="nav-link {{ $r === 'devices.index' ? 'active' : '' }}" href="{{ route('devices.index') }}">Devices</a></li>
-                    <li class="nav-item"><a class="nav-link {{ $r === 'employees.index' ? 'active' : '' }}" href="{{ route('employees.index') }}">Employees</a></li>
-                    <li class="nav-item"><a class="nav-link {{ $r === 'devices.Attendance' ? 'active' : '' }}" href="{{ route('devices.Attendance') }}">Attendance</a></li>
-                    <li class="nav-item"><a class="nav-link {{ $r === 'help' ? 'active' : '' }}" href="{{ route('help') }}">Help</a></li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="logsDrop" role="button" data-bs-toggle="dropdown" aria-expanded="false">Logs</a>
-                        <ul class="dropdown-menu" aria-labelledby="logsDrop">
-                            <li><a class="dropdown-item" href="{{ route('activity.index') }}">Server Activity</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><h6 class="dropdown-header">Device diagnostics</h6></li>
-                            <li><a class="dropdown-item" href="{{ route('devices.DeviceLog') }}">Device Check-ins</a></li>
-                            <li><a class="dropdown-item" href="{{ route('devices.FingerLog') }}">Device Messages</a></li>
-                        </ul>
-                    </li>
-                </ul>
-            </div>
-            <span class="navbar-text d-none d-lg-block text-light">{{ now()->format('D, d M Y H:i') }}</span>
-        </div>
-    </nav>
+    @php
+        $r = (string) Route::currentRouteName();
 
-    <div class="container mt-4 mb-5">
-        @yield('content')
+        // Several routes render "into" one nav entry: a single device's punch log
+        // belongs under Devices, the CSV export under Attendance, and the
+        // dashboard/health redirects under Monitoring.
+        $isMonitoring = in_array($r, ['monitoring', 'dashboard', 'health']);
+        $isAttendance = in_array($r, ['devices.Attendance', 'attendance.export']);
+        $isDeviceLogs = in_array($r, ['devices.DeviceLog', 'devices.FingerLog']);
+        $isDevices = str_starts_with($r, 'devices.') && ! $isAttendance && ! $isDeviceLogs;
+    @endphp
+
+    <div class="app-shell">
+        <aside class="app-sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="appSidebar" aria-labelledby="appSidebarBrand">
+            <div class="app-sidebar-inner">
+                <div class="app-sidebar-header">
+                    <a class="app-brand" id="appSidebarBrand" href="{{ route('monitoring') }}">
+                        <i class="bi bi-fingerprint"></i>
+                        <span>ADMS Server</span>
+                    </a>
+                    <button type="button" class="btn-close btn-close-white d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#appSidebar" aria-label="Close navigation"></button>
+                </div>
+
+                <nav class="app-nav">
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {{ $isMonitoring ? 'active' : '' }}" href="{{ route('monitoring') }}">
+                                <i class="bi bi-speedometer2"></i> Monitoring
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ $isDevices ? 'active' : '' }}" href="{{ route('devices.index') }}">
+                                <i class="bi bi-hdd-network"></i> Devices
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ $r === 'employees.index' ? 'active' : '' }}" href="{{ route('employees.index') }}">
+                                <i class="bi bi-people"></i> Employees
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ $isAttendance ? 'active' : '' }}" href="{{ route('devices.Attendance') }}">
+                                <i class="bi bi-clock-history"></i> Attendance
+                            </a>
+                        </li>
+                    </ul>
+
+                    <div class="app-nav-heading">Logs</div>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {{ $r === 'activity.index' ? 'active' : '' }}" href="{{ route('activity.index') }}">
+                                <i class="bi bi-activity"></i> Server Activity
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ $r === 'devices.DeviceLog' ? 'active' : '' }}" href="{{ route('devices.DeviceLog') }}">
+                                <i class="bi bi-broadcast"></i> Device Check-ins
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ $r === 'devices.FingerLog' ? 'active' : '' }}" href="{{ route('devices.FingerLog') }}">
+                                <i class="bi bi-chat-square-dots"></i> Device Messages
+                            </a>
+                        </li>
+                    </ul>
+
+                    <div class="app-nav-heading">Support</div>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {{ $r === 'help' ? 'active' : '' }}" href="{{ route('help') }}">
+                                <i class="bi bi-question-circle"></i> Help
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </aside>
+
+        <div class="app-main">
+            <header class="app-topbar">
+                <button class="btn btn-sm btn-outline-secondary d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#appSidebar" aria-controls="appSidebar" aria-label="Toggle navigation">
+                    <i class="bi bi-list"></i>
+                </button>
+                <span class="fw-bold d-lg-none">ADMS Server</span>
+                <div class="ms-auto d-flex align-items-center gap-3">
+                    <span class="small text-muted">{{ now()->format('D, d M Y H:i') }}</span>
+                    <form action="{{ route('logout') }}" method="POST">
+                        @csrf
+                        <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-box-arrow-right"></i> Log out</button>
+                    </form>
+                </div>
+            </header>
+
+            <main class="app-content">
+                @yield('content')
+            </main>
+        </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
-    <script src="https://cdn.datatables.net/1.11.4/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.datatables.net/1.11.4/js/dataTables.bootstrap5.min.js"></script>
-    <script>
-        $(document).ready(function() {
-            $('.navbar-toggler').on('click', function() { $('body').toggleClass('menu-open'); });
-            $('.nav-link').on('click', function() {
-                if ($(window).width() < 992) { $('.navbar-collapse').removeClass('show'); $('body').removeClass('menu-open'); }
-            });
-        });
-    </script>
     @stack('scripts')
 </body>
 </html>

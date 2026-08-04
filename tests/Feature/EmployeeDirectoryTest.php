@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Attendance;
+use App\Models\Device;
+use App\Models\DeviceAssignment;
 use App\Models\EmployeeMap;
 use App\Queries\EmployeeDirectory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -48,8 +50,8 @@ class EmployeeDirectoryTest extends TestCase
     public function test_mapped_search_matches_enrolled_device_serial(): void
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ABALES, DANICA']);
-        \App\Models\Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
+        Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
+        DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
 
         $this->assertCount(1, EmployeeDirectory::mapped('PYA8261500108')); // by serial
         $this->assertCount(1, EmployeeDirectory::mapped('X.E'));           // by device name
@@ -59,8 +61,8 @@ class EmployeeDirectoryTest extends TestCase
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ON TEST']);
         EmployeeMap::create(['device_pin' => '270_111', 'company' => '270', 'chapa' => '111', 'payroll_employee_id' => 70001, 'name' => 'NOT ON TEST']);
-        \App\Models\Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
+        Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
+        DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
 
         $filtered = EmployeeDirectory::mapped(null, 'PYA8261500108');
 
@@ -71,8 +73,8 @@ class EmployeeDirectoryTest extends TestCase
     public function test_mapped_enrolled_devices_reference_physical_serial(): void
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ABALES, DANICA']);
-        \App\Models\Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
+        Device::create(['no_sn' => 'PYA8261500108', 'nama' => 'X.E', 'payroll_device_code' => 'TEST']);
+        DeviceAssignment::create(['device_code' => 'TEST', 'payroll_employee_id' => 32609]);
 
         $devices = EmployeeDirectory::mapped()[0]->devices;
 
@@ -85,12 +87,25 @@ class EmployeeDirectoryTest extends TestCase
     public function test_mapped_enrolled_device_without_a_linked_reader_falls_back_to_code(): void
     {
         EmployeeMap::create(['device_pin' => '270_39475', 'company' => '270', 'chapa' => '39475', 'payroll_employee_id' => 32609, 'name' => 'ABALES, DANICA']);
-        \App\Models\DeviceAssignment::create(['device_code' => 'PBW IN', 'payroll_employee_id' => 32609]);
+        DeviceAssignment::create(['device_code' => 'PBW IN', 'payroll_employee_id' => 32609]);
 
         $devices = EmployeeDirectory::mapped()[0]->devices;
 
         $this->assertNull($devices[0]['serial']);
         $this->assertSame('PBW IN', $devices[0]['code']);
+    }
+
+    public function test_mapped_paginates_and_reports_the_true_total(): void
+    {
+        foreach (range(1, 3) as $i) {
+            EmployeeMap::create(['device_pin' => "5_{$i}", 'company' => '5', 'chapa' => (string) $i, 'payroll_employee_id' => 1000 + $i, 'name' => "Person {$i}"]);
+        }
+
+        $page = EmployeeDirectory::mapped(null, null, 2);
+
+        $this->assertCount(2, $page);       // items on this page
+        $this->assertSame(3, $page->total()); // true total across all pages
+        $this->assertSame(2, $page->lastPage());
     }
 
     public function test_unmapped_pins_lists_pins_not_in_map_with_counts(): void
@@ -105,5 +120,17 @@ class EmployeeDirectoryTest extends TestCase
         $this->assertCount(1, $unmapped);
         $this->assertSame('5_9999', (string) $unmapped[0]->employee_id);
         $this->assertSame(2, (int) $unmapped[0]->punch_count);
+    }
+
+    public function test_unmapped_pins_paginates(): void
+    {
+        foreach (range(1, 3) as $i) {
+            $this->punch("5_{$i}", "2026-06-17 08:0{$i}:00");
+        }
+
+        $page = EmployeeDirectory::unmappedPins(2);
+
+        $this->assertCount(2, $page);
+        $this->assertSame(3, $page->total());
     }
 }

@@ -27,5 +27,7 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="ADMS_AUTH_USERNAME" value="test-admin"/>
+        <env name="ADMS_AUTH_PASSWORD" value="test-password"/>
     </php>
 </phpunit>

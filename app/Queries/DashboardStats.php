@@ -21,7 +21,9 @@ class DashboardStats
             'punches_today' => Attendance::whereDate('timestamp', now()->toDateString())->count(),
             'pending_count' => Attendance::where('is_sync', false)->whereNull('sync_error')->count(),
             'failed_count' => Attendance::where('is_sync', false)->whereNotNull('sync_error')->count(),
-            'unmapped_count' => EmployeeDirectory::unmappedPins()->count(),
+            // total(), not count() — unmappedPins() is paginated, so count() would
+            // report only the first page's worth of enrollment gaps.
+            'unmapped_count' => EmployeeDirectory::unmappedPins()->total(),
         ];
     }
 }
