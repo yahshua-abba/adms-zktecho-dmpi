@@ -20,6 +20,9 @@ $app-border:  #e4e7ec;
 // The sidebar keeps its own dark palette independent of the page, which is why
 // these aren't expressed as Bootstrap theme colours.
 $app-sidebar-width:    248px;
+// Collapsed ("rail") width: icon + the nav link's own horizontal padding, so the
+// icons land on the same optical centre they do when expanded.
+$app-sidebar-rail-width: 68px;
 $app-sidebar-bg:       #101828;
 $app-sidebar-fg:       #cdd5df;
 $app-sidebar-fg-muted: #8c99ab;

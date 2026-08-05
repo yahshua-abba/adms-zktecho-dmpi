@@ -3,6 +3,10 @@
 namespace App\Sync;
 
 use App\Contracts\PayrollClient;
+use App\Exceptions\PayrollAuthException;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
@@ -26,6 +30,8 @@ class HttpPayrollClient implements PayrollClient
         private string $password,
         private string $userAgent = 'YP_TIMEKEEPER',
         private int $timeout = 600,
+        private int $retries = 3,
+        private int $retryBaseMs = 2000,
     ) {}
 
     public function pushLogs(array $logs): PushResult
@@ -102,6 +108,17 @@ class HttpPayrollClient implements PayrollClient
 
         $assignments = [];
         foreach ($data['timekeeper_device_employees'] ?? [] as $row) {
+            // DMPI ships *un-assignments* in the same list: rows flagged is_active
+            // false meaning "this person no longer belongs on this device". Neither
+            // the full nor the incremental pull filters them server-side, so taking
+            // every row as an assignment enrols people who were explicitly removed.
+            // Observed live for Bugo: 28,788 of 56,158 rows were inactive.
+            // (array_key_exists, not a truthy check: a payload that omits the field
+            // entirely keeps the old behaviour rather than dropping everything.)
+            if (array_key_exists('is_active', $row) && ! $row['is_active']) {
+                continue;
+            }
+
             $employeeId = $row['employee']['id'] ?? null;
             $deviceRef = $row['timekeeper_device'] ?? null;
             $code = is_array($deviceRef)
@@ -141,12 +158,66 @@ class HttpPayrollClient implements PayrollClient
         return $response;
     }
 
-    private function authed(string $token)
+    private function authed(string $token): PendingRequest
     {
-        return Http::withHeaders([
-            'Authorization' => 'Token '.$token,
-            'User-Agent' => $this->userAgent,
-        ])->connectTimeout(15)->timeout($this->timeout);
+        return $this->base()->withHeaders(['Authorization' => 'Token '.$token]);
+    }
+
+    /**
+     * Base request: the user-agent DMPI sniffs for timekeeper access, the long read
+     * ceiling its bulk endpoints need, and backoff for transport failures.
+     *
+     * throw: false is deliberate. With throwing on, enabling retries makes Laravel
+     * throw on *any* unsuccessful response, which would break both the 401 re-auth
+     * path in send() and login()'s deliberate read of DMPI's error body. Retries
+     * are driven purely by the when() callback instead.
+     */
+    private function base(): PendingRequest
+    {
+        return Http::withHeaders(['User-Agent' => $this->userAgent])
+            ->connectTimeout(15)
+            ->timeout($this->timeout)
+            ->retry(
+                max(1, $this->retries),
+                fn (int $attempt) => (int) min($this->retryBaseMs * (2 ** ($attempt - 1)), 30000),
+                fn (\Throwable $e) => $this->isTransient($e),
+                throw: false,
+            );
+    }
+
+    /**
+     * Worth another go: the connection dropped, DMPI is overloaded (5xx), or it
+     * asked us to slow down (429). A 401/403 is a decision rather than a blip —
+     * and retrying a refused login is exactly how the account gets locked out.
+     */
+    private function isTransient(\Throwable $e): bool
+    {
+        if ($e instanceof ConnectionException) {
+            return ! $this->isReadTimeout($e);
+        }
+
+        if ($e instanceof RequestException && $e->response !== null) {
+            $status = $e->response->status();
+
+            return $status === 429 || $status >= 500;
+        }
+
+        return false;
+    }
+
+    /**
+     * A read timeout is not a blip worth repeating: the request already had the
+     * full — and deliberately very generous — timeout budget, so retrying only
+     * multiplies the wait. Three attempts at the 600s ceiling is half an hour of
+     * silence, which is exactly what DMPI's read_device_info endpoint produced.
+     *
+     * cURL words a read timeout "Operation timed out"; a *connection* timeout
+     * ("Connection timed out", against the 15s connect ceiling) is a genuine blip
+     * and still gets another go.
+     */
+    private function isReadTimeout(\Throwable $e): bool
+    {
+        return stripos($e->getMessage(), 'Operation timed out') !== false;
     }
 
     private function authToken(): string
@@ -154,16 +225,30 @@ class HttpPayrollClient implements PayrollClient
         return $this->token ??= $this->login();
     }
 
+    /**
+     * Trade the configured credentials for an API token.
+     *
+     * Throws rather than returning an empty token on refusal: a blank token
+     * still produces well-formed requests, so every caller would silently read
+     * DMPI's error body as an empty roster/device list and treat a lockout as
+     * "nothing to sync" (which then wiped the assignment table).
+     */
     private function login(): string
     {
-        return (string) Http::withHeaders(['User-Agent' => $this->userAgent])
-            ->connectTimeout(15)->timeout($this->timeout)
+        $response = $this->base()
             ->post($this->url('api/api-auth/'), [
                 'username' => $this->username,
                 'password' => $this->password,
                 'from_local_server' => true,
-            ])
-            ->json('token');
+            ]);
+
+        $token = $response->json('token');
+
+        if (! is_string($token) || trim($token) === '') {
+            throw PayrollAuthException::fromResponse($response);
+        }
+
+        return $token;
     }
 
     private function url(string $path): string

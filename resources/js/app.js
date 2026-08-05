@@ -30,3 +30,45 @@ window.TomSelect = TomSelect;
  * *after* any inline script is parsed but *before* DOMContentLoaded fires.
  */
 window.$ = window.jQuery = $;
+
+/**
+ * Desktop sidebar collapse.
+ *
+ * The state lives as `.sidebar-collapsed` on <html>; the head already restored it
+ * from localStorage before first paint, so all this does is flip it and remember.
+ * Below lg the button is hidden and the class has no effect — there the sidebar is
+ * Bootstrap's offcanvas drawer.
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    const toggle = document.getElementById('sidebarCollapseToggle');
+
+    if (! toggle) {
+        return;
+    }
+
+    const sync = () => {
+        const collapsed = document.documentElement.classList.contains('sidebar-collapsed');
+        const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('title', label);
+    };
+
+    toggle.addEventListener('click', () => {
+        const collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+
+        try {
+            localStorage.setItem('adms.sidebarCollapsed', collapsed ? '1' : '0');
+        } catch (e) { /* storage disabled — the toggle still works for this page */ }
+
+        sync();
+
+        // DataTables sizes its columns from the container width and only
+        // recalculates on a resize event, which a CSS width change doesn't fire.
+        // Wait out the transition, then tell it the width moved.
+        window.setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+    });
+
+    sync();
+});

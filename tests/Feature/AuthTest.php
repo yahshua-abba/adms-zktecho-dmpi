@@ -14,9 +14,17 @@ class AuthTest extends TestCase
         $this->guest()->get(route('devices.Attendance'))->assertRedirect(route('login'));
     }
 
+    /**
+     * The point is that the route isn't gated. Its *status* deliberately follows
+     * the server's health — 503 when something needs attention, which is how an
+     * external uptime monitor learns anything — so asserting 200 here would tie a
+     * routing test to whatever the checks happen to say.
+     */
     public function test_guest_can_still_reach_healthz(): void
     {
-        $this->guest()->get(route('health.json'))->assertOk();
+        $this->guest()->get(route('health.json'))
+            ->assertJsonStructure(['status', 'checks'])
+            ->assertHeader('content-type', 'application/json');
     }
 
     public function test_guest_can_still_reach_device_push_endpoints(): void

@@ -45,8 +45,16 @@ docker run --rm \
     laravelsail/php84-composer:latest \
     composer install --no-interaction --prefer-dist
 
-if printf '%s\n' "$CHANGED_FILES" | grep -Eq '(^|/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$'; then
+# The dashboard loads its CSS/JS from the Vite build (public/build, which is
+# gitignored), so a stale build ships stale styling — and a missing one makes
+# every page throw "Vite manifest not found". Rebuild whenever the sources or
+# the dependencies moved, not just when a lockfile did.
+if printf '%s\n' "$CHANGED_FILES" | grep -Eq '(^|/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|vite\.config\.js)$|^resources/(js|sass|css)/'; then
     step "Install and build frontend assets"
+    ./vendor/bin/sail npm install
+    ./vendor/bin/sail npm run build
+elif [ ! -f public/build/manifest.json ]; then
+    step "Build frontend assets (no existing build found)"
     ./vendor/bin/sail npm install
     ./vendor/bin/sail npm run build
 fi

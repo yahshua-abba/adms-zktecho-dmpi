@@ -124,4 +124,33 @@ class UiPagesTest extends TestCase
         $response->assertSee('<input type="hidden" name="unmapped_per_page" value="10">', false);
         $response->assertSee('<input type="hidden" name="tab" value="mapped">', false);
     }
+
+    public function test_the_page_size_picker_is_not_wired_through_an_inline_onchange(): void
+    {
+        // Regression: the picker used to navigate from an inline onchange="".
+        // Inline handlers evaluate inside an implicit `with (document)`, so the
+        // bare identifier `URL` resolved to `document.URL` — a string — and
+        // `new URL(location.href)` threw "URL is not a constructor" before the
+        // handler could navigate. The select still moved to the chosen value, so
+        // every page-size picker looked like it was ignoring the click. The
+        // delegated listener runs in normal scope, where `URL` is the constructor.
+        $response = $this->get('/employees');
+
+        $response->assertOk();
+        // `onchange="this.form.submit()"` on the filter selects is fine — `form`
+        // and `submit` aren't shadowed by document. It's specifically a *global
+        // constructor* used from an inline handler that breaks, so that's what
+        // this pins.
+        $this->assertDoesNotMatchRegularExpression(
+            '/on[a-z]+="[^"]*\bnew\s+URL\b/i',
+            $response->getContent(),
+            'An inline handler is calling `new URL(...)`; inside one, `URL` is document.URL (a string).'
+        );
+        // Each picker carries its own params for the shared listener to read.
+        $response->assertSee('class="form-select form-select-sm w-auto js-per-page"', false);
+        $response->assertSee('data-param="mapped_per_page"', false);
+        $response->assertSee('data-page-param="mapped_page"', false);
+        // One listener for all three pickers on this page, not three copies.
+        $this->assertSame(1, substr_count($response->getContent(), 'js-per-page\')'));
+    }
 }

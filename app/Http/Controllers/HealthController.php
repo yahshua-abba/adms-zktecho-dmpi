@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Health\SchedulerControl;
+use App\Health\SchedulerGuard;
 use App\Health\SystemHealth;
 use App\Models\ActivityLog;
 
@@ -33,8 +34,14 @@ class HealthController extends Controller
     }
 
     /** Machine-readable health for external uptime monitors. 200 if ok/warn, 503 if fail. */
-    public function json()
+    public function json(SchedulerGuard $guard)
     {
+        // The most reliable heartbeat this box has: an uptime monitor polls this
+        // every minute or two, around the clock, long after anyone has stopped
+        // looking at the dashboard. Piggy-backing the watchdog on it means a
+        // scheduler that dies at 2am is back within one poll.
+        $guard->ensureRunning('noticed by a /healthz check');
+
         $checks = SystemHealth::checks();
         $overall = SystemHealth::overall($checks);
 

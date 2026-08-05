@@ -6,9 +6,11 @@ use App\Models\Attendance;
 use App\Models\Device;
 use App\Models\DeviceAssignment;
 use App\Models\EmployeeMap;
+use App\Models\PinCollision;
 use App\Support\PerPage;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The Employees screen's data: the mapped roster (employee_map, with each
@@ -104,14 +106,51 @@ class EmployeeDirectory
         return $employees;
     }
 
-    /** Device PINs seen in attendances that have no employee_map row. */
+    /**
+     * Device PINs seen in attendances that have no employee_map row.
+     *
+     * Contested PINs are unmapped too, but they belong on the conflicts tab — the
+     * fix for them is "decide which employee owns this PIN", not "enrol the
+     * missing user", so listing them here would send an operator the wrong way.
+     *
+     * Both exclusions are correlated subqueries rather than pluck()-ed id lists:
+     * the roster is ~9k rows and that became a 9k-item IN clause on every load.
+     */
     public static function unmappedPins(int $perPage = PerPage::DEFAULT): LengthAwarePaginator
     {
         return Attendance::query()
-            ->whereNotIn('employee_id', EmployeeMap::pluck('device_pin'))
+            ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('employee_map')
+                ->whereColumn('employee_map.device_pin', 'attendances.employee_id'))
+            ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('pin_collisions')
+                ->whereColumn('pin_collisions.device_pin', 'attendances.employee_id'))
             ->selectRaw('employee_id, count(*) as punch_count, max(timestamp) as last_punch_at')
             ->groupBy('employee_id')
             ->orderByRaw('max(timestamp) desc')
             ->paginate($perPage, ['*'], 'unmapped_page');
+    }
+
+    /**
+     * Device PINs claimed by more than one payroll employee (see RosterSync).
+     *
+     * Undecided ones sort first — they're the ones actively holding punches back.
+     * Each row carries how many punches are stuck behind it, so the cost of
+     * leaving it undecided is visible rather than abstract.
+     */
+    public static function collisions(int $perPage = PerPage::DEFAULT): LengthAwarePaginator
+    {
+        $collisions = PinCollision::query()
+            ->orderByRaw('resolved_payroll_employee_id is null desc')
+            ->orderBy('device_pin')
+            ->paginate($perPage, ['*'], 'conflicts_page');
+
+        $stuck = Attendance::whereIn('employee_id', $collisions->pluck('device_pin'))
+            ->where('is_sync', false)
+            ->selectRaw('employee_id, count(*) as stuck_count')
+            ->groupBy('employee_id')
+            ->pluck('stuck_count', 'employee_id');
+
+        $collisions->each(fn ($c) => $c->setAttribute('stuck_punches', (int) ($stuck[$c->device_pin] ?? 0)));
+
+        return $collisions;
     }
 }

@@ -18,9 +18,20 @@ use Illuminate\Support\Collection;
  * It diffs that against what's already been pushed (device_enrollment) and
  * queues "DATA UPDATE USERINFO" for new/changed users and "DATA DELETE
  * USERINFO" for ones no longer assigned — then records the new intended state.
+ *
+ * A contested device PIN has no employee_map row on purpose (see RosterSync),
+ * so it simply never appears in the desired set: an ambiguous PIN can't be
+ * enrolled under a guessed name any more than its punches can be pushed to a
+ * guessed employee.
+ *
+ * The diff is computed first and written in chunks — a device with thousands of
+ * assigned employees used to cost several queries per user.
  */
 class EnrollmentReconciler
 {
+    /** Rows per bulk write. */
+    private const CHUNK = 500;
+
     public function reconcileAll(): void
     {
         Device::whereNotNull('payroll_device_code')
@@ -37,25 +48,49 @@ class EnrollmentReconciler
 
         $desired = $this->desiredUsers($device->payroll_device_code);
         $current = DeviceEnrollment::where('device_sn', $deviceSn)->get()->keyBy('pin');
+        $now = now();
+
+        $commands = [];
+        $enrollments = [];
 
         // Add or update.
         foreach ($desired as $pin => $user) {
             $existing = $current->get($pin);
             if ($existing === null || $existing->name !== $user['name'] || $existing->card !== $user['card']) {
-                $this->queue($deviceSn, $this->updateCommand($user));
-                DeviceEnrollment::updateOrCreate(
-                    ['device_sn' => $deviceSn, 'pin' => $pin],
-                    ['name' => $user['name'], 'card' => $user['card']],
-                );
+                $commands[] = $this->commandRow($deviceSn, $this->updateCommand($user), $now);
+                $enrollments[] = [
+                    'device_sn' => $deviceSn,
+                    'pin' => $pin,
+                    'name' => $user['name'],
+                    'card' => $user['card'],
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
             }
         }
 
-        // Remove anyone no longer assigned.
+        // Remove anyone no longer assigned. Queued after the updates so the device
+        // sees them in the same order it used to.
+        $removed = [];
         foreach ($current as $pin => $enrollment) {
             if (! $desired->has($pin)) {
-                $this->queue($deviceSn, "DATA DELETE USERINFO PIN={$pin}");
-                $enrollment->delete();
+                $commands[] = $this->commandRow($deviceSn, "DATA DELETE USERINFO PIN={$pin}", $now);
+                $removed[] = $pin;
             }
+        }
+
+        foreach (array_chunk($enrollments, self::CHUNK) as $chunk) {
+            // created_at stays out of the update list so a re-pushed user keeps the
+            // date it was first enrolled.
+            DeviceEnrollment::upsert($chunk, ['device_sn', 'pin'], ['name', 'card', 'updated_at']);
+        }
+
+        foreach (array_chunk($removed, self::CHUNK) as $chunk) {
+            DeviceEnrollment::where('device_sn', $deviceSn)->whereIn('pin', $chunk)->delete();
+        }
+
+        foreach (array_chunk($commands, self::CHUNK) as $chunk) {
+            DeviceCommand::insert($chunk);
         }
     }
 
@@ -79,8 +114,15 @@ class EnrollmentReconciler
         return "DATA UPDATE USERINFO PIN={$user['pin']}\tName={$user['name']}\tPri=0\tCard={$user['card']}";
     }
 
-    private function queue(string $deviceSn, string $body): void
+    /** @return array<string, mixed> */
+    private function commandRow(string $deviceSn, string $body, $now): array
     {
-        DeviceCommand::create(['device_sn' => $deviceSn, 'body' => $body, 'status' => 'pending']);
+        return [
+            'device_sn' => $deviceSn,
+            'body' => $body,
+            'status' => 'pending',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
     }
 }

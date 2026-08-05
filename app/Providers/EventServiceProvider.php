@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Health\ScheduledTaskRecorder;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -18,6 +19,18 @@ class EventServiceProvider extends ServiceProvider
         Registered::class => [
             SendEmailVerificationNotification::class,
         ],
+    ];
+
+    /**
+     * Subscribers, which get the dispatcher and register themselves.
+     *
+     * @var array<int, class-string>
+     */
+    protected $subscribe = [
+        // Records every scheduled job run. A subscriber rather than four separate
+        // listener entries because it has to hold state between the start and end
+        // of a run, which only one long-lived instance can do.
+        ScheduledTaskRecorder::class,
     ];
 
     /**
