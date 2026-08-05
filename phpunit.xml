@@ -29,5 +29,10 @@
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="ADMS_AUTH_USERNAME" value="test-admin"/>
         <env name="ADMS_AUTH_PASSWORD" value="test-password"/>
+        <!-- Off by default here, or every test that loads /monitoring or /healthz
+             would find no scheduler running and launch a real one on the machine
+             running the suite. The guard's own tests turn it back on against a
+             fake SchedulerControl. -->
+        <env name="ADMS_SCHEDULER_AUTOSTART" value="false"/>
     </php>
 </phpunit>

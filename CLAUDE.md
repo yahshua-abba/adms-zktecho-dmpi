@@ -61,6 +61,51 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
   device PIN, formatted `"{company}_{chapa}"`. It is resolved to a
   `payroll_employee_id` through the `employee_map` table (`device_pin` column).
   An unmapped PIN leaves the punch unsynced with a recorded `sync_error`.
+- **A contested PIN is refused, never guessed.** `"{company}_{chapa}"` was assumed
+  globally unique; in DMPI's live data it is not (observed: `271_14257` and
+  `271_14598`, two payroll employees each). `RosterSync` used to write both and let
+  the last one win, so a punch was filed against whichever claimant came last in
+  the download. A punch carries only the PIN, so nothing on the edge can tell the
+  claimants apart — the fix is to stop guessing, not guess better. Contested PINs
+  go to `pin_collisions` and are deliberately **left out of `employee_map`**, which
+  makes them unresolvable at push time and therefore unsynced-with-a-reason (the
+  existing unmapped-PIN path) rather than mis-attributed. The absence of the row is
+  the safety: no code path can use an id that isn't there. `EnrollmentReconciler`
+  skips them for free for the same reason. An operator decides the owner under
+  Employees > PIN conflicts; the decision persists across roster pulls and is
+  re-validated against the current claimants each run.
+- **`RosterSync` refuses an empty roster** (`EmptyRosterException`), for the same
+  reason `DeviceInfoSync` refuses an empty device payload: the run now *removes*
+  state on the strength of the payload (clearing collisions that no longer
+  collide, dropping mappings that became contested), so acting on a failed call
+  would undo real decisions.
+- **Sync writes are chunked, never row-at-a-time.** All three stages bulk
+  upsert/insert in chunks of 500. The roster is ~9k people and `updateOrCreate`
+  cost two queries each, which made *saving* the roster slower than downloading it
+  (~45s vs ~18s). `DeviceInfoSync` also dedupes `(device_code, employee_id)` pairs
+  before inserting — the payload can repeat a pair, and the unique index rejects
+  what the old per-row upsert quietly absorbed.
+- **Nothing that talks to DMPI runs inside a web request.** The "Sync from DMPI"
+  button hands off to `DmpiSyncLauncher`, which detaches `payroll:sync-all` (the
+  same pattern `SchedulerControl` uses for `schedule:work` — this box has no queue
+  worker, and the scheduler itself is operator-started). `payroll:sync-all` holds
+  a cache lock for the run, so a second press reports "already running" instead of
+  doubling load on both sides. This matters because `artisan serve` fronts PHP's
+  built-in server: without `PHP_CLI_SERVER_WORKERS` (set in `compose.yaml`) it
+  serves **one request at a time**, so a single 10-minute payroll read took the
+  whole dashboard — `/login` and `/healthz` included — offline until it finished.
+- **A payroll call never fails quietly.** `HttpPayrollClient::login()` throws
+  `PayrollAuthException` (carrying DMPI's own wording, e.g. "You've reached the
+  maximum login attempt") instead of returning an empty token. Returning `''`
+  produced well-formed-but-unauthorized requests whose error bodies parsed as an
+  empty roster/device list, so a lockout was indistinguishable from "DMPI has no
+  data" — and every health indicator stayed green through it.
+- **An empty device-info payload is refused, not applied.** `DeviceInfoSync`
+  replaces the whole `device_assignments` table each run, so a zero-device *and*
+  zero-assignment response would wipe it and leave `EnrollmentReconciler` queueing
+  a delete for every enrolled user on every linked device. That shape is a failed
+  call, never a real state, so it raises `EmptyDeviceInfoException`. An empty
+  assignment list *alongside* real devices is legitimate and still replaces.
 - **Punch dedup is at the DB.** Ingest uses `insertOrIgnore` against a unique index
   on `(sn, employee_id, timestamp)`, so device re-sends (after a reconnect) are
   dropped silently while still acknowledged to the device.
@@ -99,9 +144,55 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
   command; `app/Console/Kernel.php` schedules them (roster hourly, attendances
   every minute, devices hourly, enrollment reconcile every 15 min, log prune
   daily). All use `withoutOverlapping()`.
-- **`app/Health/`** + `app/Maintenance/`: system health checks, scheduler control,
-  and the log pruner. Raw `device_log`/`finger_log` are pruned after
-  `ADMS_LOG_RETENTION_DAYS` (default 30); attendance rows are never pruned.
+- **`app/Health/`** + `app/Maintenance/`: system health checks, scheduler control
+  and watchdog, the scheduled-run recorder, and the log pruner. Raw
+  `device_log`/`finger_log` are pruned after `ADMS_LOG_RETENTION_DAYS` (default
+  30); attendance rows are never pruned.
+
+### Scheduler monitoring
+
+- **Job runs are recorded from the outside.** `ScheduledTaskRecorder` (an event
+  subscriber on Laravel's `ScheduledTask*` events) writes one
+  `scheduled_task_runs` row per run, surfaced on Logs > Scheduler. Watching from
+  outside is the point: each command already logs its own result, but that only
+  captures failures a command survives long enough to describe. A job that hangs,
+  and a job blocked because the previous one is hanging, both leave the command's
+  own logging untouched. `Kernel::job()` also redirects each job's output to
+  `storage/logs/tasks/`, since a scheduled command runs in a subprocess and
+  otherwise prints to the null device.
+- **An overlap-blocked run is not a success.** `withoutOverlapping()` is
+  implemented as a `skip` filter, so a blocked job arrives as `ScheduledTaskSkipped`
+  — indistinguishable from "a condition said don't run" unless the mutex is
+  re-checked, which is what `blockedByItsOwnPreviousRun()` does. It also has a
+  second path: if the mutex is taken between the filter check and the launch,
+  `Event::run()` returns before setting an exit code and Laravel reports an
+  ordinary *finish*, so a null `exitCode` there means the same thing. Both land as
+  status `overlapping`. Filed as successes, a job wedged for hours would show an
+  unbroken column of green.
+- **"Are jobs running?" outranks "is the process alive?".** The Scheduler health
+  card and `SchedulerGuard` both consult `ScheduledTaskRun::heartbeatIsFresh()`
+  first and only fall back to `SchedulerControl::processState()` to explain a
+  silence. The deployment notes offer plain cron calling `schedule:run` as an
+  alternative to a long-running `schedule:work`, and that setup has no process for
+  `pgrep` to find — judging by the process alone would call a healthy box dead and
+  have the watchdog start a scheduler beside cron's, running every job twice.
+- **`processState()` has three values, not two.** `UNKNOWN` (no `exec`, no
+  `pgrep`) is kept apart from `STOPPED` because they want opposite handling:
+  `STOPPED` is a red light and an invitation to restart, `UNKNOWN` means our own
+  instrument is broken and must never be reported as an outage or acted on.
+- **The watchdog runs from things that are alive by definition.** A watchdog *on
+  the schedule* is dead exactly when needed, so `SchedulerGuard::ensureRunning()`
+  is called from the Monitoring page, from `/healthz` (which uptime monitors poll
+  around the clock), and from `scheduler:guard` for system cron — never from
+  `Kernel::schedule()`. It holds an unreleased cache lock as its throttle, because
+  a newly launched scheduler is not visible to `pgrep` for a moment and every
+  request arriving in that window would otherwise start another one.
+- **Payroll-pull freshness comes from `sync_runs`, successes only.** The roster and
+  assignment health cards report how long ago each data set last downloaded
+  *successfully* — counting rows only ever proved a download happened once, and
+  counting attempts would let a job failing hourly report the freshest possible
+  data. `payroll:sync-devices` with no `--only` records part `device-info`, not
+  `all`, so a device pull cannot vouch for a roster it never touched.
 
 ### Dashboard login
 
@@ -132,9 +223,20 @@ and the icon font, because this box often sits on a device LAN with no internet.
   listed last in `@vite([...])` so our rules win over the DataTables theme.
 - The shell in `layouts/app.blade.php` is a sidebar + sticky topbar built on
   Bootstrap's *responsive* offcanvas (`.offcanvas-lg`) — a drawer below `lg`, a
-  static column above it, with no custom toggle JS. The sidebar's background sits
-  on an inner `.app-sidebar-inner` because Bootstrap forces
-  `background-color: transparent !important` on `.offcanvas-lg` at `lg` and up.
+  static column above it; Bootstrap's data-api drives the drawer, so no toggle JS
+  of ours. The sidebar's background sits on an inner `.app-sidebar-inner` because
+  Bootstrap forces `background-color: transparent !important` on `.offcanvas-lg`
+  at `lg` and up.
+- **The desktop collapse is a `.sidebar-collapsed` class on `<html>`, restored by
+  an inline script in `<head>`, not from the bundle.** Persisted in localStorage
+  (`adms.sidebarCollapsed`); the bundle only handles the click. Setting the class
+  from the deferred bundle would paint the full-width sidebar first and snap it to
+  the rail a frame later. The rail is scoped to `lg` and up on purpose — below it
+  the sidebar is a drawer that's open or absent, and a rail would be a second,
+  contradictory state. Nav labels are `display: none` in the rail (not
+  `visibility`), or they'd keep their width and overflow it. Toggling also
+  dispatches a `resize` event: DataTables sizes columns from the container width
+  and a CSS width change doesn't fire one on its own.
 - **Inline view scripts that use `$` must wait for `DOMContentLoaded`.** The Vite
   bundle is a deferred ES module, so it executes after inline scripts are parsed
   (but before `DOMContentLoaded` fires). See `devices/attendance.blade.php`.
@@ -147,7 +249,9 @@ and the icon font, because this box often sits on a device LAN with no internet.
 - `config/payroll.php` — DMPI connection (URL, credentials, the required
   `YP_TIMEKEEPER` user-agent, batch size, long read timeout). Driven by `PAYROLL_*`
   env vars.
-- `config/adms.php` — `ADMS_LOG_RETENTION_DAYS`.
+- `config/adms.php` — `ADMS_LOG_RETENTION_DAYS`, `ADMS_ERROR_RETENTION_DAYS`, and
+  `adms.scheduler.*` (`ADMS_SCHEDULER_AUTOSTART`, on by default;
+  `ADMS_SCHEDULER_AUTOSTART_THROTTLE`).
 
 ### Logging tables
 
@@ -155,3 +259,20 @@ and the icon font, because this box often sits on a device LAN with no internet.
   carrying a body/options) to avoid ~2,880 rows/device/day.
 - `finger_log` — every raw payload a device POSTs (attendance + on-device activity).
 - `error_log` — ingest failures.
+- `scheduled_task_runs` — one row per scheduled job run. The fastest-growing table
+  here (the punch push alone runs 1,440 times a day) and pruned on the same window,
+  except rows still marked `running` — an unfinished row is evidence of a job that
+  hung, which is exactly what someone reading this log is looking for.
+
+**Retention has two windows, and the carve-outs are the point.** `LogPruner` ages
+routine rows out after `ADMS_LOG_RETENTION_DAYS` (30) and keeps warnings, errors
+and rejected payloads for `ADMS_ERROR_RETENTION_DAYS` (365, floored at the routine
+window). The split exists because volume and value point in opposite directions in
+`activity_log`: nearly every row is the every-minute push reporting nothing
+happened, while the few warnings answer "since when has this been failing?" — a
+question about months. Three things are never pruned by age alone: attendance rows
+(the data of record), `sync_runs`/`scheduled_task_runs` still marked `running` (an
+unfinished row *is* the evidence of a hang), and `device_commands` still `pending`
+or `sent` — the devices that queue waits on are exactly the ones offline for weeks,
+so pruning by age would silently cancel enrollment changes for the readers that had
+been unplugged longest.

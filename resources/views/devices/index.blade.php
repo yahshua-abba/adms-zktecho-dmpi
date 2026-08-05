@@ -1,10 +1,42 @@
 @extends('layouts.app')
 
 @section('content')
-    <h2 class="mb-4">{{ $lable }}</h2>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <h2 class="mb-0">{{ $lable }}</h2>
+        {{-- Both live here, not on Employees. They come from the same DMPI call but
+             differ entirely in reach: one refreshes payroll's list of clock names,
+             shown below; the other rewrites the machines on the wall. Employees
+             keeps only the roster download. --}}
+        <div class="d-flex flex-wrap gap-2">
+            <form action="{{ route('dmpi.sync', 'devices') }}" method="POST">
+                @csrf
+                <button type="submit" class="btn btn-outline-success" title="Refresh payroll's list of time clock names, shown below. Only a list — it does not touch the machines on the wall or change who can use them.">
+                    <i class="bi bi-hdd-network"></i> Download devices
+                </button>
+            </form>
+            {{-- Confirmed through a real modal, not window.confirm(): the browser box
+                 is a fixed size we cannot style, and it silently scrolled an
+                 explanation this long down to its last two lines — hiding the very
+                 warning it exists to deliver. The form is empty here and submitted by
+                 the modal's button via form="", the same pattern the device rows use. --}}
+            <form id="download-assignments" action="{{ route('dmpi.sync', 'assignments') }}" method="POST">
+                @csrf
+            </form>
+            <button type="button" class="btn btn-outline-success"
+                    data-bs-toggle="modal" data-bs-target="#confirm-assignments"
+                    title="Ask payroll who belongs on each time clock, then rewrite the machines on the wall to match — adding and removing people.">
+                <i class="bi bi-diagram-3"></i> Download assignments
+            </button>
+        </div>
+    </div>
+
+    @include('partials.sync-progress')
 
     @if (session('success'))
         <div class="alert alert-success">{{ session('success') }}</div>
+    @endif
+    @if (session('error'))
+        <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
 
     <div class="filter-bar">
@@ -50,6 +82,82 @@
             </div>
         </form>
     </div>
+
+    {{-- ─── DMPI's own device list ───
+         Kept visible in its own right. It previously rendered only as a dropdown
+         inside each physical device row, so on a server with no clocks checked in
+         a successful download of 89 devices showed up nowhere and looked like a
+         failure. --}}
+    @php
+        $linkedCount = collect($payrollDevices)->filter(fn ($pd) => ! empty($pd->linked_serials))->count();
+    @endphp
+    <div class="card mb-4">
+        <div class="card-body py-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                    <i class="bi bi-cloud-check text-muted me-1"></i>
+                    <strong>Payroll devices from DMPI</strong>
+                    <span class="badge {{ count($payrollDevices) ? 'bg-success' : 'bg-secondary' }} ms-1">{{ count($payrollDevices) }}</span>
+                    @if (count($payrollDevices))
+                        <span class="text-muted small ms-2">
+                            {{ $linkedCount }} linked to a clock here,
+                            {{ count($payrollDevices) - $linkedCount }} not yet
+                        </span>
+                    @endif
+                </div>
+                @if (count($payrollDevices))
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#payroll-devices">
+                        Show list
+                    </button>
+                @endif
+            </div>
+
+            @if (count($payrollDevices))
+                <div class="collapse mt-3" id="payroll-devices">
+                    <div class="table-responsive" style="max-height: 22rem; overflow-y: auto;">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="sticky-top bg-body">
+                                <tr><th>Code</th><th>Location</th><th>Clock connected here</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($payrollDevices as $pd)
+                                    <tr>
+                                        <td><code>{{ $pd->code }}</code></td>
+                                        <td class="text-muted">{{ $pd->name ?: '—' }}</td>
+                                        <td>
+                                            @forelse ($pd->linked_serials as $serial)
+                                                <span class="badge bg-light text-dark border"><i class="bi bi-hdd-network"></i> {{ $serial }}</span>
+                                            @empty
+                                                <span class="text-muted">—</span>
+                                            @endforelse
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            @else
+                <div class="text-muted small mt-2">
+                    Nothing downloaded yet. Use <strong>Download devices</strong> above to pull DMPI's list.
+                </div>
+            @endif
+        </div>
+    </div>
+
+    @if ($log->isEmpty())
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i>
+            <strong>No time clock has contacted this server yet.</strong>
+            Clocks add themselves the first time they check in — they can't be created here.
+            @if (count($payrollDevices))
+                The {{ count($payrollDevices) }} payroll devices above are DMPI's records, not clocks talking to this server;
+                once a real clock checks in you can link it to one of them.
+            @endif
+            Check <a href="{{ route('devices.DeviceLog') }}">Device Check-ins</a> to see whether anything is reaching the server at all.
+        </div>
+    @endif
 
     <div class="table-card">
         <div class="table-responsive">
@@ -109,11 +217,90 @@
                                     @csrf
                                     <button type="submit" class="btn btn-sm btn-outline-success" title="Queue enrollment commands for this device">Sync enrollments</button>
                                 </form>
+                                {{-- The serial is reported by the device itself over an endpoint that
+                                     is deliberately open, so it is attacker-controlled. It must never
+                                     reach inline JS: see the submit handler below. --}}
+                                <form action="{{ route('devices.destroy', $d->id) }}" method="POST"
+                                      class="d-inline js-remove-device" data-serial="{{ $d->no_sn }}">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                            title="Remove this clock from the list. Punches are kept.">Remove</button>
+                                </form>
                             </td>
                         </tr>
                     @endforeach
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    {{-- ─── "Download assignments" confirmation ───
+         Long on purpose. This is the only control on the page that reaches into the
+         physical machines, and the only one whose damage the server cannot repair:
+         it holds no fingerprint templates, so a wrongly removed person has to
+         re-enrol at the machine in person. It also spells out what a "clock" is,
+         because this page uses "device" for both the machine on the wall and
+         payroll's paper record of one, and that gap is the whole risk.
+
+         Sits outside the form and submits it by id, so nothing is nested and the
+         modal can live at the end of the page where Bootstrap prefers it. --}}
+    <div class="modal fade" id="confirm-assignments" tabindex="-1"
+         aria-labelledby="confirm-assignments-title" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirm-assignments-title">
+                        <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+                        Rewrite the time clocks?
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <p>
+                        A <strong>time clock</strong> is the physical machine on the wall that people
+                        touch to clock in. Each one holds its own list of who is allowed to use it.
+                    </p>
+
+                    <p class="mb-2">
+                        This asks payroll for its current lists, then rewrites those machines to match:
+                    </p>
+                    <ul>
+                        <li>people who should be on a machine are <strong>added</strong></li>
+                        <li>people no longer assigned are <strong>removed</strong></li>
+                    </ul>
+
+                    <div class="alert alert-warning d-flex gap-2 mb-3">
+                        <i class="bi bi-fingerprint fs-5"></i>
+                        <div>
+                            <strong>Removing someone also erases their fingerprint from that machine.</strong>
+                            This server keeps no copy of fingerprints, so anyone removed by mistake has to
+                            walk to the machine and scan their finger again. That part cannot be undone
+                            from here.
+                        </div>
+                    </div>
+
+                    <div class="alert alert-light border d-flex gap-2 mb-3">
+                        <i class="bi bi-shield-check fs-5 text-success"></i>
+                        <div>
+                            <strong>Not affected:</strong> attendance records, the employee list, and each
+                            clock's own settings.
+                        </div>
+                    </div>
+
+                    <p class="mb-0 text-muted">
+                        Only continue if payroll's assignments are correct right now.
+                    </p>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" form="download-assignments" class="btn btn-danger">
+                        <i class="bi bi-diagram-3"></i> Yes, rewrite the clocks
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 @endsection
@@ -124,6 +311,31 @@
     // doesn't exist yet while this inline script is being parsed. Deferred modules
     // do run before DOMContentLoaded, so $ is available inside the callback.
     document.addEventListener('DOMContentLoaded', function () {
+        // Confirm before removing a clock.
+        //
+        // Deliberately NOT an inline onsubmit. The device serial comes from the
+        // device itself, over /iclock/* which has no login by design, so anything
+        // on the device LAN can choose it. Interpolated into an inline handler it
+        // lands inside a JS string literal — and the HTML parser decodes entities
+        // before the JS engine ever sees them, so a serial containing an apostrophe
+        // closed the string and the rest of it ran. Reading the serial from a data
+        // attribute keeps it a string and nothing else.
+        document.querySelectorAll('form.js-remove-device').forEach(function (form) {
+            form.addEventListener('submit', function (e) {
+                var serial = form.dataset.serial || 'this device';
+                var ok = confirm(
+                    'Remove ' + serial + ' from this server?\n\n' +
+                    'Its attendance punches are KEPT — they are still valid records.\n' +
+                    "What goes is this device's enrolled-user list and any queued commands.\n\n" +
+                    'If the clock is still switched on and pointed here, it will reappear at its next check-in.'
+                );
+
+                if (!ok) {
+                    e.preventDefault();
+                }
+            });
+        });
+
         // Searchable "Timekeeper device" dropdown — the option list can run to
         // dozens of entries (one per DMPI timekeeper device code), so a plain
         // <select> makes finding the right one a scroll-and-squint exercise.
@@ -133,6 +345,11 @@
                 allowEmptyOption: true,
                 maxOptions: null,
                 placeholder: '— not linked —',
+                // Bootstrap's .table-responsive sets overflow-x, and CSS turns that
+                // into clipping on BOTH axes — so the dropdown was cut off after two
+                // entries with 89 codes to choose from. Attaching it to <body> takes
+                // it out of the scrolling box entirely.
+                dropdownParent: 'body',
             });
         });
 
@@ -171,6 +388,12 @@
             order: [],
             lengthMenu: @json(\App\Support\PerPage::OPTIONS),
             pageLength: {{ \App\Support\PerPage::DEFAULT }},
+            language: {
+                // "No data available in table" reads like a fault. This table only
+                // ever fills when a physical clock checks in, so say that instead.
+                emptyTable: 'No time clocks have checked in to this server yet.',
+                zeroRecords: 'No clocks match those filters.',
+            },
         });
 
         $('#filterForm').on('submit', function (e) { e.preventDefault(); table.draw(); });

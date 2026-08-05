@@ -2,8 +2,13 @@
 // The app shell: sidebar + sticky topbar + content column.
 //
 // The sidebar is a Bootstrap *responsive* offcanvas (`.offcanvas-lg`): a slide-in
-// drawer below lg, a static column at lg and up. That's why there's no custom
-// toggle JS — Bootstrap's data-api handles it.
+// drawer below lg, a static column at lg and up. Bootstrap's data-api handles the
+// drawer, so the only custom JS is the desktop collapse toggle.
+//
+// Collapsing is driven by `.sidebar-collapsed` on <html> (set by an inline script
+// in the head from localStorage, so the rail never paints wide-then-narrow). It is
+// deliberately scoped to lg and up: below lg the sidebar is a drawer that's either
+// open or absent, and a rail there would just be a second, contradictory state.
 // ---------------------------------------------------------------------------
 
 .app-shell {
@@ -104,6 +109,54 @@
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
+}
+
+// --- Collapsed rail (lg and up only) ---------------------------------------
+
+@include media-breakpoint-up(lg) {
+    .app-sidebar {
+        transition: flex-basis .18s ease, width .18s ease;
+
+        @media (prefers-reduced-motion: reduce) {
+            transition: none;
+        }
+    }
+
+    .sidebar-collapsed {
+        .app-sidebar {
+            flex-basis: $app-sidebar-rail-width;
+            width: $app-sidebar-rail-width;
+        }
+
+        // Labels are removed from the flow, not just made invisible — otherwise
+        // they keep their width and the flex row overflows the rail.
+        .app-nav-label {
+            display: none;
+        }
+
+        .app-sidebar-header {
+            justify-content: center;
+            padding-inline: 0;
+        }
+
+        .app-brand .bi {
+            font-size: 1.35rem;
+        }
+
+        .app-nav .nav-link {
+            justify-content: center;
+            gap: 0;
+            padding-inline: 0;
+        }
+
+        // A section heading with its text hidden would collapse to an odd gap, so
+        // it becomes the rule that separates the groups instead.
+        .app-nav-heading {
+            margin: .75rem .5rem;
+            padding: 0;
+            border-top: 1px solid $app-sidebar-hover-bg;
+        }
+    }
 }
 
 .app-main {

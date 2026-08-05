@@ -21,6 +21,17 @@
         <div class="alert alert-success">{{ session('success') }}</div>
     @endif
 
+    {{-- Say so when the page itself just restarted the scheduler. A repair that
+         happens invisibly looks like nothing was ever wrong, and "it fixes itself"
+         is the wrong thing to learn when something is killing the process. --}}
+    @if (!empty($schedulerRestarted))
+        <div class="alert alert-warning">
+            <i class="bi bi-arrow-clockwise"></i>
+            The scheduler wasn't running, so it was started again automatically. Automatic syncing resumes within a minute.
+            <a href="{{ route('scheduler.log') }}" class="alert-link">See the scheduler log</a> if this keeps happening.
+        </div>
+    @endif
+
     {{-- Overall status banner --}}
     <div class="alert {{ $banner[0] }} d-flex align-items-center" role="alert">
         <span class="fs-4 me-2">{{ $overall === 'ok' ? '✓' : ($overall === 'warn' ? '!' : '✕') }}</span>

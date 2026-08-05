@@ -115,11 +115,12 @@
             <h3>5. The screens</h3>
             <table class="table help">
                 <tbody>
-                <tr><th>Monitoring</th><td>The single "is everything OK?" page (the old <em>Dashboard</em> and <em>Health</em> are now merged here, and both redirect to it). Shows an overall status banner, <strong>At a glance</strong> stat cards (devices online/offline, punches today, pending/failed sync, unmapped PINs), and a <strong>System health</strong> grid of checks (database, scheduler, payroll credentials, DMPI reachable, sync backlog, roster, devices, recent errors). Each health card is clickable to the underlying data. Auto-refreshes every 30s and has the <strong>Start scheduler</strong> button.</td></tr>
+                <tr><th>Monitoring</th><td>The single "is everything OK?" page (the old <em>Dashboard</em> and <em>Health</em> are now merged here, and both redirect to it). Shows an overall status banner, <strong>At a glance</strong> stat cards (devices online/offline, punches today, pending/failed sync, unmapped PINs), and a <strong>System health</strong> grid of checks (database, scheduler, payroll credentials, DMPI reachable, sync backlog, roster, device assignments, devices online, recent errors). Each health card is clickable to the underlying data. Auto-refreshes every 30s and has the <strong>Start scheduler</strong> button. The <em>Employee roster</em> and <em>Device assignments</em> cards go amber then red as the last successful download ages (3h / 24h), so a pull that quietly stopped shows up even though the data is still sitting there. If the page finds the scheduler stopped it restarts it for you and says so.</td></tr>
                 <tr><th>Devices</th><td>Each device's online status, name/location, IN/OUT direction, and which DMPI device it's linked to. Set direction + link here, and use <strong>Sync enrollments</strong> to push users to a device.</td></tr>
-                <tr><th>Employees</th><td>Two tabs: <strong>Mapped</strong> — the roster (name, company, CHAPA, device PIN, <strong>RFID card</strong>, payroll id, and the <strong>physical device serial(s)</strong> each person is enrolled on); searchable across <em>every</em> column and filterable by enrolled device. <strong>Unmapped PINs</strong> — people tapping who aren't matched to an employee yet. The <strong>Sync from DMPI</strong> button lives here.</td></tr>
+                <tr><th>Employees</th><td>Two tabs: <strong>Mapped</strong> — the roster (name, company, CHAPA, device PIN, <strong>RFID card</strong>, payroll id, and the <strong>physical device serial(s)</strong> each person is enrolled on); searchable across <em>every</em> column and filterable by enrolled device. <strong>Unmapped PINs</strong> — people tapping who aren't matched to an employee yet. <strong>PIN conflicts</strong> — device PINs claimed by more than one payroll employee, waiting for someone to decide who owns them. The three <strong>Download</strong> buttons live here.</td></tr>
                 <tr><th>Attendance</th><td>Every punch with employee details, device + location, and its full lifecycle as three time columns — <strong>Punched</strong> (at the device), <strong>Received</strong> (by ADMS), <strong>Synced</strong> (to payroll) — plus a sync-status badge (synced/pending/failed/<strong>skipped</strong>). IN/OUT is shown read-only. Filter by date/device/company/employee/sync. <strong>Sync to payroll now</strong> pushes all pending punches on demand. Tick rows to open a selection toolbar — selections persist as you page through — with <strong>Sync selected</strong> (push just those, even ones marked skipped), <strong>Exclude from sync</strong>/<strong>Include in sync</strong> (mark punches so the automatic sync leaves them alone, e.g. a known bad tap you don't want going to payroll yet), and <strong>Delete selected</strong> (permanently removes the local record — payroll keeps whatever it already received).</td></tr>
                 <tr><th>Logs ▾ → Server Activity</th><td>What ADMS itself is doing (sync runs, pulls, reconciles, errors). See section 8.</td></tr>
+                <tr><th>Logs ▾ → Scheduler</th><td>Whether the background scheduler is alive, and every job it has started — one row per run, with how long it took and what it printed. Recorded by watching the scheduler from the outside, so a job that crashes before it can log anything still appears. <strong>Each job's last run</strong> at the top shows all five scheduled jobs side by side, so the hourly ones aren't buried by the every-minute punch push. A result of <span class="badge bg-warning text-dark">still busy</span> means the job was due but its previous run hadn't finished — a long run of those is a job that has hung, which is a different problem from a stopped scheduler and is <em>not</em> fixed by pressing Start.</td></tr>
                 <tr><th>Logs ▾ → Device Check-ins</th><td>When each device connected and reported its settings — useful to confirm a device is reaching the server. (Was "Device Log".) Auto-pruned after 30 days.</td></tr>
                 <tr><th>Logs ▾ → Device Messages</th><td>Everything a device sends — attendance taps and on-device activity (menu/settings) — with a plain-language "What happened" column and the raw payload tucked into "Technical details". (Was "Finger Log".) Auto-pruned after 30 days.</td></tr>
                 </tbody>
@@ -130,9 +131,14 @@
                 <thead><tr><th>Button</th><th>Where</th><th>What it does</th></tr></thead>
                 <tbody>
                 <tr>
-                    <td><span class="badge bg-success">Sync from DMPI</span></td>
+                    <td><span class="badge bg-success">Download employees</span></td>
                     <td>Employees</td>
-                    <td><strong>Pulls</strong> from DMPI on demand: the employee roster (names + RFID), the device list + assignments, then re-queues enrollment commands. Use it after you change something in DMPI (e.g. add an employee, set an RFID, assign someone to a device) and want it reflected now instead of waiting for the hourly sync. Inbound (DMPI → ADMS).</td>
+                    <td><strong>Pulls</strong> the employee roster (names + RFID) from DMPI on demand. Use it after you add an employee or set an RFID in DMPI and want it reflected now instead of waiting for the hourly sync. Inbound (DMPI → ADMS).</td>
+                </tr>
+                <tr>
+                    <td><span class="badge bg-success">Download devices</span> <span class="badge bg-success">Download assignments</span></td>
+                    <td>Devices</td>
+                    <td><strong>Pulls</strong> from DMPI on demand: the list of devices DMPI knows about, and who is assigned to each one. <em>Download assignments</em> replaces the whole assignment list and then re-queues enrollment commands, so people are added to and removed from the readers to match. Inbound (DMPI → ADMS).</td>
                 </tr>
                 <tr>
                     <td><span class="badge bg-success">Sync to payroll now</span></td>
@@ -146,12 +152,12 @@
                 </tr>
                 <tr>
                     <td><span class="badge bg-outline-primary border text-primary">Start scheduler</span></td>
-                    <td>Monitoring</td>
-                    <td>(Re)starts the background scheduler if it has stopped — e.g. after a server/container restart. The scheduler is what makes the automatic every-minute/hourly syncs run. If the <em>Scheduler</em> health card is red, click this. No terminal needed; it won't start a duplicate if one's already running.</td>
+                    <td>Monitoring, Logs → Scheduler</td>
+                    <td>(Re)starts the background scheduler if it has stopped — e.g. after a server/container restart. The scheduler is what makes the automatic every-minute/hourly syncs run. No terminal needed; it won't start a duplicate if one's already running. Usually you won't need it: loading the Monitoring page or a <code>/healthz</code> poll restarts a stopped scheduler on its own (set <code>ADMS_SCHEDULER_AUTOSTART=false</code> to turn that off where supervisor or systemd already owns the process).</td>
                 </tr>
                 </tbody>
             </table>
-            <p class="text-muted small mb-0"><strong>Sync from DMPI</strong> = pull data in; <strong>Sync to payroll now</strong> = push punches out; <strong>Sync enrollments</strong> = push users down to a reader. Each also has an equivalent artisan command (section 10), and all run automatically on a schedule.</p>
+            <p class="text-muted small mb-0">The <strong>Download</strong> buttons = pull data in; <strong>Sync to payroll now</strong> = push punches out; <strong>Sync enrollments</strong> = push users down to a reader. Each also has an equivalent artisan command (section 10), and all run automatically on a schedule.</p>
         </section>
 
         {{-- 6 --}}
@@ -168,7 +174,7 @@
                     </ol>
                     <p class="text-muted small mb-0 mt-2">Newly created devices are active immediately — there's no separate "publish" or "approve" step. Whichever company's credentials ADMS's <code>PAYROLL_*</code> service account uses determines which devices it's allowed to see, so the device's <strong>company</strong> has to match that account.</p>
                 </li>
-                <li><strong>Pull the data.</strong> Click <strong>Sync from DMPI</strong> on the Employees page (or run <code>php artisan payroll:sync-roster</code> + <code>payroll:sync-devices</code>, or let the scheduler do it). This fills Employees + the device dropdown.</li>
+                <li><strong>Pull the data.</strong> On the Employees page click <strong>Download employees</strong>; then on the Devices page click <strong>Download devices</strong>, then <strong>Download assignments</strong> (or run <code>php artisan payroll:sync-roster</code> + <code>payroll:sync-devices</code>, or let the scheduler do it). This fills Employees + the device dropdown. Each runs in the background — the page stays usable.</li>
                 <li><strong>Point a device at ADMS.</strong> On the device's Cloud/ADMS setting, set the server to this machine's LAN IP. It auto-appears on the Devices page and shows <em>online</em>.</li>
                 <li><strong>Configure the device in ADMS.</strong> Set its <strong>Direction</strong> (IN/OUT/BOTH) and pick its matching <strong>Timekeeper device</strong> from the dropdown. Save.</li>
                 <li><strong>Enroll.</strong> Click <strong>Sync enrollments</strong> → ADMS pushes the assigned employees (PIN + name + card) to the device.</li>
@@ -205,8 +211,10 @@
                 <tr><td><span class="badge bg-light text-dark border badge-evt">enrollment.reconcile</span></td><td>The 15-min enrollment check. <em>"Commands queued: N"</em> — 0 means devices already match payroll.</td></tr>
                 <tr><td><span class="badge bg-light text-dark border badge-evt">devices.sync</span></td><td>The hourly device + assignment pull. <em>"Devices: 89, assignments: 139047"</em> = how much was pulled.</td></tr>
                 <tr><td><span class="badge bg-light text-dark border badge-evt">roster.sync</span></td><td>The hourly employee pull. If it shows an <span class="badge bg-danger">error</span> ("timed out"), that's the known DMPI <code>read_employees</code> slowness (see troubleshooting).</td></tr>
-                <tr><td><span class="badge bg-light text-dark border badge-evt">dmpi.pull</span></td><td>A manual <strong>Sync from DMPI</strong> button press — pulled roster + devices and reconciled enrollments on demand.</td></tr>
+                <tr><td><span class="badge bg-light text-dark border badge-evt">dmpi.pull</span></td><td>A manual <strong>Download</strong> button press on the Employees page. The message says which part was requested.</td></tr>
                 <tr><td><span class="badge bg-light text-dark border badge-evt">scheduler.start</span></td><td>The <strong>Start scheduler</strong> button was used to (re)start the background scheduler.</td></tr>
+                <tr><td><span class="badge bg-light text-dark border badge-evt">logs.prune</span></td><td>The nightly cleanup deleted old log rows, with a per-table breakdown. Only recorded when it actually deleted something.</td></tr>
+                <tr><td><span class="badge bg-light text-dark border badge-evt">scheduler.autostart</span></td><td>The scheduler was found stopped and restarted by itself. Logged as a <span class="badge bg-warning text-dark">warning</span> on purpose — the outage was real, and a stream of these means something keeps killing it.</td></tr>
                 </tbody>
             </table>
         </section>
@@ -227,7 +235,7 @@
                 </tr>
                 <tr>
                     <td><strong>Scheduler</strong> health card is <span class="badge bg-danger">fail</span></td>
-                    <td>The background scheduler stopped (common after a server/container restart, since it isn't auto-started). Click <strong>Start scheduler</strong> on the Monitoring page — automatic syncing resumes within a minute. For a permanent fix, run it under supervisor/cron so it restarts on boot.</td>
+                    <td>Read the card's wording — it now says which of two different problems this is. <em>"Not running"</em> means the process is gone (common after a server/container restart): it should restart itself when you load Monitoring, and <strong>Start scheduler</strong> forces it. <em>"Running, but no job has started since…"</em> means the opposite — the scheduler is alive and a job it launched has hung, so pressing Start won't help and would kill the stuck run. Open <strong>Logs → Scheduler</strong>, find the job sitting at <span class="badge bg-primary">running</span> with a wall of <span class="badge bg-warning text-dark">still busy</span> rows behind it, and deal with that job. For a permanent fix to the first case, run the scheduler under supervisor/cron, or add <code>scheduler:guard</code> to system cron.</td>
                 </tr>
                 <tr>
                     <td>Punch shows <span class="badge bg-danger">failed</span></td>
@@ -273,7 +281,7 @@ php artisan payroll:sync-attendances</pre></li>
                 <li><strong>Into a running Docker container:</strong>
 <pre>docker compose exec web php artisan payroll:sync-attendances</pre></li>
             </ul>
-            <p class="text-muted small">Tip: every UI button maps to a command here — <strong>Sync from DMPI</strong> = <code>sync-roster</code> + <code>sync-devices</code> + <code>reconcile-enrollments</code>; <strong>Sync to payroll now</strong> = <code>sync-attendances</code>; <strong>Sync enrollments</strong> = <code>reconcile-enrollments</code>; <strong>Start scheduler</strong> = <code>schedule:work</code>. Useful for testing or one-off runs; in normal operation the <strong>scheduler</strong> runs them for you (see Deployment).</p>
+            <p class="text-muted small">Tip: every UI button maps to a command here — <strong>Download employees</strong> = <code>sync-roster</code>; <strong>Download devices</strong> = <code>sync-devices --only=devices</code>; <strong>Download assignments</strong> = <code>sync-devices --only=assignments</code> (which also reconciles); <code>payroll:sync-all</code> runs the lot; <strong>Sync to payroll now</strong> = <code>sync-attendances</code>; <strong>Sync enrollments</strong> = <code>reconcile-enrollments</code>; <strong>Start scheduler</strong> = <code>schedule:work</code>. Useful for testing or one-off runs; in normal operation the <strong>scheduler</strong> runs them for you (see Deployment).</p>
 
             <h6>Artisan commands</h6>
             <table class="table help">
@@ -282,8 +290,9 @@ php artisan payroll:sync-attendances</pre></li>
                 <tr><td><code>payroll:sync-roster</code></td><td>Pull the employee roster (incl. RFID) into the map (auto hourly).</td></tr>
                 <tr><td><code>payroll:sync-devices</code></td><td>Pull the device list + assignments from DMPI (auto hourly).</td></tr>
                 <tr><td><code>payroll:reconcile-enrollments</code></td><td>Queue device commands to match users to assignments (auto every 15 min).</td></tr>
-                <tr><td><code>logs:prune</code></td><td>Delete raw device logs older than the retention window (auto daily).</td></tr>
+                <tr><td><code>logs:prune</code></td><td>Delete log rows older than the retention window (auto daily at 02:00). Never touches attendance, a download or job run still in progress, or a device command not yet delivered.</td></tr>
                 <tr><td><code>schedule:work</code></td><td>Run the scheduler so all the above fire automatically.</td></tr>
+                <tr><td><code>scheduler:guard</code></td><td>Start the scheduler if it has stopped, and say nothing if it hasn't. For system cron — deliberately <em>not</em> on the schedule itself, since a watchdog that only runs when the scheduler is alive can't restart one that isn't.</td></tr>
                 </tbody>
             </table>
             <h6>Key <code>.env</code> settings</h6>
@@ -294,7 +303,9 @@ php artisan payroll:sync-attendances</pre></li>
                 <tr><td><code>PAYROLL_USER_AGENT</code></td><td><code>YP_TIMEKEEPER</code> (DMPI grants access by user-agent).</td></tr>
                 <tr><td><code>PAYROLL_TIMEOUT</code></td><td>Seconds to wait on DMPI's slow read endpoints (default 600).</td></tr>
                 <tr><td><code>PAYROLL_BATCH_SIZE</code></td><td>How many punches to push per batch.</td></tr>
-                <tr><td><code>ADMS_LOG_RETENTION_DAYS</code></td><td>Days of raw device logs to keep (default 30).</td></tr>
+                <tr><td><code>ADMS_LOG_RETENTION_DAYS</code></td><td>Days of routine log rows to keep (default 30) — raw device logs, DMPI calls, download and scheduler run logs, finished device commands, and ordinary Server Activity lines.</td></tr>
+                <tr><td><code>ADMS_ERROR_RETENTION_DAYS</code></td><td>Days to keep warnings and errors (default 365). Longer on purpose: they're few, and "since when has this been failing?" is a question about months. Values below the routine window are ignored.</td></tr>
+                <tr><td><code>ADMS_SCHEDULER_AUTOSTART</code></td><td>Restart a stopped scheduler automatically (default <code>true</code>). Set <code>false</code> where supervisor/systemd already owns the process, so the two don't both start it.</td></tr>
                 </tbody>
             </table>
         </section>
@@ -330,6 +341,8 @@ php artisan config:cache && php artisan route:cache</pre>
             <p>Point your web server's document root at <code>public/</code> and serve on <strong>port 80</strong> so devices can reach <code>/iclock/*</code>.</p>
             <p>Add the <strong>scheduler to cron</strong> (the standard Laravel one-liner) so all jobs fire on time:</p>
 <pre>* * * * * cd /var/www/adms && php artisan schedule:run >> /dev/null 2>&1</pre>
+            <p>Cron drives the schedule directly here, so there's no long-running <code>schedule:work</code> to die and nothing to restart — the dashboard recognises this setup by the jobs themselves running, and leaves it alone. If you'd rather keep <code>schedule:work</code>, drop the line above and use the watchdog instead, which restarts it whenever it's found stopped:</p>
+<pre>* * * * * cd /var/www/adms && php artisan scheduler:guard >> /dev/null 2>&1</pre>
 
             <h6>Point the devices at ADMS</h6>
             <p>On each device's Cloud/ADMS server setting, set the server to ADMS's <strong>LAN IP</strong> and port <strong>80</strong>. It will auto-register on the Devices page; then set its direction + payroll link and Sync enrollments.</p>

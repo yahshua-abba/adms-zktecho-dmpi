@@ -5,15 +5,17 @@ namespace App\Http\Controllers;
 use App\Models\ActivityLog;
 use App\Models\Attendance;
 use App\Models\Device;
+use App\Models\DeviceCommand;
+use App\Models\DeviceEnrollment;
 use App\Models\EmployeeMap;
 use App\Models\PayrollDevice;
 use App\Queries\AttendanceQuery;
 use App\Queries\LogQuery;
 use App\Sync\AttendanceSync;
-use App\Sync\DeviceInfoSync;
+use App\Sync\DmpiSyncLauncher;
 use App\Sync\EnrollmentReconciler;
-use App\Sync\RosterSync;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Yajra\DataTables\Facades\DataTables;
 
@@ -25,7 +27,19 @@ class DeviceController extends Controller
         $data['lable'] = 'Devices';
         // Use the Device model (not a raw row) so the view can call isOnline()/status.
         $data['log'] = Device::orderBy('online', 'DESC')->get();
-        $data['payrollDevices'] = PayrollDevice::orderBy('code')->get();
+
+        // Two different lists, and confusing them is easy: `devices` are physical
+        // clocks that have checked in here, `payroll_devices` is DMPI's own list.
+        // The payroll list used to render ONLY as a dropdown inside each physical
+        // device row, so with no clocks checked in, a freshly downloaded set of 89
+        // appeared nowhere at all — the download looked like it had failed.
+        $linkedByCode = $data['log']->whereNotNull('payroll_device_code')->groupBy('payroll_device_code');
+
+        $data['payrollDevices'] = PayrollDevice::orderBy('code')->get()
+            ->each(fn (PayrollDevice $pd) => $pd->setAttribute(
+                'linked_serials',
+                ($linkedByCode->get($pd->code) ?? collect())->pluck('no_sn')->all()
+            ));
 
         return view('devices.index', $data);
     }
@@ -279,6 +293,41 @@ class DeviceController extends Controller
         return redirect()->route('devices.index')->with('success', 'Device updated.');
     }
 
+    /**
+     * Remove a clock from this server.
+     *
+     * Devices add themselves by checking in, so this is a tidy-up for readers that
+     * have been retired, replaced, or (like a test serial) never existed — not a
+     * way to stop a live one, which simply reappears on its next check-in.
+     *
+     * Punches are deliberately kept: they are the data of record, they may not have
+     * reached payroll yet, and they are still valid attendance whatever happened to
+     * the hardware. What does go is our belief about the device — the enrolled user
+     * list and any queued commands. Leaving the enrollment behind would be worse
+     * than useless: if the clock ever came back, the reconciler would compare
+     * against a stale list, conclude its users were already loaded, and push
+     * nothing to a reader that might have been wiped.
+     */
+    public function destroy(Device $device)
+    {
+        $serial = $device->no_sn;
+        $punches = Attendance::where('sn', $serial)->count();
+
+        DB::transaction(function () use ($serial, $device) {
+            DeviceEnrollment::where('device_sn', $serial)->delete();
+            DeviceCommand::where('device_sn', $serial)->delete();
+            $device->delete();
+        });
+
+        $message = "Device {$serial} removed. Its {$punches} punch(es) were kept.";
+        ActivityLog::record('device.removed', $message, 'warning');
+
+        return redirect()->route('devices.index')->with(
+            'success',
+            $message.' It will reappear on its own if it checks in again.'
+        );
+    }
+
     // Live online/offline status per device serial, polled by the Devices page.
     public function status()
     {
@@ -292,23 +341,38 @@ class DeviceController extends Controller
 
     // Manual "Sync from DMPI" button — pulls the roster + device info from DMPI,
     // then re-queues enrollment commands so RFID/assignment changes reach devices.
-    public function syncFromDmpi(
-        RosterSync $roster,
-        DeviceInfoSync $devices,
-        EnrollmentReconciler $reconciler
-    ) {
-        try {
-            $roster->sync();
-            $devices->sync();
-            $reconciler->reconcileAll();
-            ActivityLog::record('dmpi.pull', 'Pulled roster + devices from DMPI and reconciled enrollments (manual).');
-
-            return redirect()->back()->with('success', 'Synced from DMPI — roster, devices, and enrollments updated.');
-        } catch (\Throwable $e) {
-            ActivityLog::record('dmpi.pull', 'Manual DMPI sync failed: '.$e->getMessage(), 'error');
-
-            return redirect()->back()->with('error', 'Sync from DMPI failed: '.$e->getMessage());
+    /**
+     * Kick off a full DMPI pull in the background.
+     *
+     * This used to run all three stages inline while the browser waited. Payroll
+     * reads get a ten-minute ceiling and the app serves one request at a time, so
+     * a single press could take the entire dashboard down — login page included —
+     * for the length of the pull. It now launches and returns immediately; the
+     * outcome lands in Server Activity.
+     */
+    public function syncFromDmpi(DmpiSyncLauncher $launcher, string $part)
+    {
+        if (! array_key_exists($part, DmpiSyncLauncher::PARTS)) {
+            abort(404);
         }
+
+        if ($launcher->isRunning()) {
+            return redirect()->back()->with('error', 'A DMPI download is already running. Watch Server Activity for the result.');
+        }
+
+        $launcher->start($part);
+        ActivityLog::record('dmpi.pull', "Manual DMPI download requested from the dashboard: {$part}.");
+
+        $expectation = match ($part) {
+            'employees' => 'Downloading employees — usually about half a minute.',
+            'devices' => 'Downloading the clock list.',
+            'assignments' => 'Downloading device assignments, then updating the clocks.',
+        };
+
+        return redirect()->back()->with(
+            'success',
+            $expectation.' It runs in the background, so this page stays usable — watch Server Activity for the result.'
+        );
     }
 
     // Manual "Sync to payroll now" button — pushes ALL pending (non-excluded)
