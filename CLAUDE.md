@@ -106,6 +106,19 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
   a delete for every enrolled user on every linked device. That shape is a failed
   call, never a real state, so it raises `EmptyDeviceInfoException`. An empty
   assignment list *alongside* real devices is legitimate and still replaces.
+- **"On the clock" means sent, never confirmed.** The Devices page's People
+  column and the per-device breakdown behind it (`App\Queries\DeviceRoster`,
+  `devices/{device}/people`) show *two* numbers side by side and must keep doing
+  so: `device_assignments` is what DMPI says belongs on the clock,
+  `device_enrollment` is what this server has told the clock — and
+  `EnrollmentReconciler` writes the latter at the moment it *queues* the command,
+  not when the device takes it. Collapsing them into one "user count" would
+  report a reader that has been unplugged for a fortnight as fully enrolled,
+  which is the exact case someone opens this screen to find. The per-person
+  "still queued" flag is therefore read out of `device_commands` bodies rather
+  than inferred from the two lists agreeing. An assigned employee with no
+  `employee_map` row can't be enrolled at all and is surfaced with its cause —
+  missing from the roster, or a contested PIN deliberately left unmapped.
 - **Punch dedup is at the DB.** Ingest uses `insertOrIgnore` against a unique index
   on `(sn, employee_id, timestamp)`, so device re-sends (after a reconnect) are
   dropped silently while still acknowledged to the device.
@@ -121,7 +134,8 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
 ### Layers / conventions
 
 - **`app/Queries/`** centralizes "how do we slice this data" rules
-  (`AttendanceQuery`, `LogQuery`, `DashboardStats`, `EmployeeDirectory`). The same
+  (`AttendanceQuery`, `LogQuery`, `DashboardStats`, `EmployeeDirectory`,
+  `DeviceRoster`). The same
   query object backs both the Blade page and its yajra/DataTables server-side AJAX
   endpoint, so filter rules live in one place and are unit-tested independently of
   HTTP. When adding a filterable/exportable screen, add the filter logic here.

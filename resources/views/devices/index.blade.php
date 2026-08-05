@@ -169,6 +169,7 @@
                         <th>Location</th>
                         <th>Direction</th>
                         <th>Timekeeper device</th>
+                        <th>People</th>
                         <th>Online</th>
                         <th>Actions</th>
                     </tr>
@@ -205,6 +206,32 @@
                                         </option>
                                     @endforeach
                                 </select>
+                            </td>
+                            {{-- Two numbers, never one. "On the clock" is what this server
+                                 has sent to the machine; "payroll assigns" is what DMPI says
+                                 belongs there. They disagree whenever an enrollment sync is
+                                 owed or a person can't be enrolled, and that disagreement is
+                                 what an operator needs to see. Full breakdown one click away.
+                                 See App\Queries\DeviceRoster. --}}
+                            @php ($people = $peopleCounts[$d->no_sn] ?? ['on_clock' => 0, 'assigned' => 0, 'blocked' => 0, 'queued' => 0, 'linked' => false])
+                            <td>
+                                <a href="{{ route('devices.people', $d->id) }}" class="text-decoration-none" title="See who is on this clock">
+                                    <span class="fs-6 fw-semibold">{{ $people['on_clock'] }}</span>
+                                    <span class="small">on the clock</span>
+                                </a>
+                                <div class="small text-muted">
+                                    @if ($people['linked'])
+                                        payroll assigns {{ $people['assigned'] }}
+                                    @else
+                                        not linked to payroll
+                                    @endif
+                                </div>
+                                @if ($people['blocked'])
+                                    <span class="badge bg-danger" title="Assigned in payroll but with no employee record here — they cannot be enrolled">{{ $people['blocked'] }} can't be added</span>
+                                @endif
+                                @if ($people['queued'])
+                                    <span class="badge bg-warning text-dark" title="Changes waiting for this device to connect and collect them">{{ $people['queued'] }} queued</span>
+                                @endif
                             </td>
                             <td data-status-sn="{{ $d->no_sn }}">
                                 <span class="status-badge badge {{ $d->isOnline() ? 'bg-success' : 'bg-secondary' }}">● {{ $d->isOnline() ? 'Online' : 'Offline' }}</span>

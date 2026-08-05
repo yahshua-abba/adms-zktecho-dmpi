@@ -10,7 +10,9 @@ use App\Models\DeviceEnrollment;
 use App\Models\EmployeeMap;
 use App\Models\PayrollDevice;
 use App\Queries\AttendanceQuery;
+use App\Queries\DeviceRoster;
 use App\Queries\LogQuery;
+use App\Support\PerPage;
 use App\Sync\AttendanceSync;
 use App\Sync\DmpiSyncLauncher;
 use App\Sync\EnrollmentReconciler;
@@ -41,7 +43,38 @@ class DeviceController extends Controller
                 ($linkedByCode->get($pd->code) ?? collect())->pluck('no_sn')->all()
             ));
 
+        // How many people are on each clock. Bulk-counted for the whole list —
+        // this page renders every device that has ever checked in, so a count
+        // per row would be four queries per device.
+        $data['peopleCounts'] = DeviceRoster::counts($data['log']);
+
         return view('devices.index', $data);
+    }
+
+    /**
+     * Who is on one time clock.
+     *
+     * Reached from the People column on the Devices list. It shows both lists
+     * side by side — what payroll assigns to the clock and what this server has
+     * sent to it — because they are different facts and the gap between them is
+     * the thing an operator is usually here to find. See App\Queries\DeviceRoster.
+     */
+    public function people(Request $request, Device $device)
+    {
+        $perPage = PerPage::resolve($request->has('per_page') ? (int) $request->query('per_page') : null);
+
+        $roster = DeviceRoster::forDevice($device, $request->only(['search', 'status']), $perPage);
+
+        return view('devices.people', [
+            'device' => $device,
+            'people' => $roster['people']->appends($request->query()),
+            'summary' => $roster['summary'],
+            'search' => $request->query('search'),
+            'status' => $request->query('status'),
+            'payrollDevice' => $device->payroll_device_code
+                ? PayrollDevice::where('code', $device->payroll_device_code)->first()
+                : null,
+        ]);
     }
 
     public function DeviceLog(Request $request)
