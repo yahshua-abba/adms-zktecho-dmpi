@@ -60,6 +60,9 @@ Route::middleware('auth.admin')->group(function () {
     // Removing a clock keeps its punches — see DeviceController::destroy.
     Route::delete('devices/{device}', [DeviceController::class, 'destroy'])->name('devices.destroy');
     Route::post('devices/{device}/sync-enrollments', [DeviceController::class, 'syncEnrollments'])->name('devices.syncEnrollments');
+    // Who is on one clock — payroll's assignments and what this server has sent,
+    // side by side. See App\Queries\DeviceRoster.
+    Route::get('devices/{device}/people', [DeviceController::class, 'people'])->name('devices.people');
     Route::get('devices/{device}/logs', [DeviceController::class, 'DevicePunchLog'])->name('devices.PunchLog');
     Route::get('devices-log', [DeviceController::class, 'DeviceLog'])->name('devices.DeviceLog');
     Route::get('finger-log', [DeviceController::class, 'FingerLog'])->name('devices.FingerLog');
