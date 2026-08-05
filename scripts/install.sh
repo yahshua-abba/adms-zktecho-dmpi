@@ -5,17 +5,13 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-step() {
-    printf '\n==> %s\n' "$1"
-}
-
-fail() {
-    printf '\nInstallation stopped: %s\n' "$1" >&2
-    exit 1
-}
+SCRIPT_LABEL="Installation stopped"
+# shellcheck source=scripts/lib.sh
+source "$ROOT_DIR/scripts/lib.sh"
 
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed. Install Docker first."
 docker info >/dev/null 2>&1 || fail "Docker is not reachable. Start Docker and check your docker group permissions."
+require_compose_v2
 
 step "Create .env if needed"
 if [[ ! -f .env ]]; then
@@ -55,6 +51,9 @@ if grep -q '^APP_KEY=.' .env; then
 else
     ./vendor/bin/sail artisan key:generate
 fi
+
+step "Wait for the database"
+wait_for_database
 
 step "Run database migrations"
 ./vendor/bin/sail artisan migrate --force

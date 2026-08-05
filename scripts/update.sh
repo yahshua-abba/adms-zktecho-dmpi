@@ -5,20 +5,17 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-step() {
-    printf '\n==> %s\n' "$1"
-}
-
-fail() {
-    printf '\nUpdate stopped: %s\n' "$1" >&2
-    exit 1
-}
+SCRIPT_LABEL="Update stopped"
+# shellcheck source=scripts/lib.sh
+source "$ROOT_DIR/scripts/lib.sh"
 
 command -v git >/dev/null 2>&1 || fail "git is not installed."
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed."
 [[ -x vendor/bin/sail ]] || fail "vendor/bin/sail is missing. Run Composer install first."
 
 docker info >/dev/null 2>&1 || fail "Docker is not reachable. Check Docker is running and your user is in the docker group."
+
+require_compose_v2
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
     printf 'Tracked local changes were found:\n'
@@ -61,6 +58,9 @@ fi
 
 step "Build and restart Sail"
 ./vendor/bin/sail up -d --build
+
+step "Wait for the database"
+wait_for_database
 
 step "Run database migrations"
 ./vendor/bin/sail artisan migrate --force

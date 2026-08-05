@@ -45,13 +45,20 @@ services:
             - './vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
         networks:
             - sail
+        # Sail's stock check (3 retries, 30s apart, no grace period) reports
+        # `unhealthy` long before a cold MySQL is done — InnoDB recovery on a
+        # large punch table, or a first-run initialisation, outlasts it. The
+        # install/update scripts wait on this status before migrating, so it
+        # has to mean "not ready yet", not "broken".
         healthcheck:
             test:
                 - CMD
                 - mysqladmin
                 - ping
                 - '-p${DB_PASSWORD}'
-            retries: 3
+            interval: 5s
+            start_period: 90s
+            retries: 10
             timeout: 5s
 networks:
     sail:
