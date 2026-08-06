@@ -61,8 +61,15 @@ step "Run database migrations"
 step "Clear Laravel caches"
 ./vendor/bin/sail artisan optimize:clear
 
+# -u sail is load-bearing. `sail exec` with no user runs as ROOT, and a scheduler
+# started that way writes root-owned files into storage/framework/cache — which
+# the dashboard and the watchdog-started scheduler (both the app user) then can't
+# open. Every job here holds a cache lock to avoid overlapping itself, so that one
+# permission error stops all five before they start: punches stop reaching
+# payroll, and the Scheduler page reads "Running, but no job has ever run".
+# Observed in the field; the repair is chown -R sail storage bootstrap/cache.
 step "Start the scheduler"
-./vendor/bin/sail exec -T laravel.test sh -lc \
+./vendor/bin/sail exec -T -u sail laravel.test sh -lc \
     "if ! pgrep -f '[a]rtisan schedule:work' >/dev/null; then nohup php artisan schedule:work >> storage/logs/scheduler.log 2>&1 & fi"
 
 step "Final checks"

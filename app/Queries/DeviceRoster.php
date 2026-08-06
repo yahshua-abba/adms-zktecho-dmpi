@@ -235,7 +235,7 @@ class DeviceRoster
         $unmatched = $assignedIds->map(fn ($id) => (int) $id)->diff($matched);
 
         if ($unmatched->isNotEmpty()) {
-            $contested = self::contestedPinsByPayrollId($unmatched);
+            $contested = PinCollision::pinsByPayrollId($unmatched);
 
             foreach ($unmatched as $payrollId) {
                 $rows['payroll:'.$payrollId] = self::row(
@@ -339,32 +339,6 @@ class DeviceRoster
                 'punch_count' => (int) $row->punch_count,
             ]])
             ->all();
-    }
-
-    /**
-     * Which contested PIN (if any) each unmappable payroll employee is caught on,
-     * so a blocked row can name its own fix instead of just its symptom.
-     *
-     * @param  Collection<int, int>  $payrollIds
-     * @return array<int, string> payroll_employee_id => device_pin
-     */
-    private static function contestedPinsByPayrollId(Collection $payrollIds): array
-    {
-        $wanted = $payrollIds->flip();
-        $byPayrollId = [];
-
-        // The claimants live in a JSON column, so the match is done in PHP. There
-        // is one row per contested PIN and only a handful exist in practice.
-        PinCollision::all()->each(function (PinCollision $collision) use ($wanted, &$byPayrollId) {
-            foreach ($collision->claimants ?? [] as $claimant) {
-                $id = (int) ($claimant['payroll_employee_id'] ?? 0);
-                if ($wanted->has($id)) {
-                    $byPayrollId[$id] = $collision->device_pin;
-                }
-            }
-        });
-
-        return $byPayrollId;
     }
 
     /**

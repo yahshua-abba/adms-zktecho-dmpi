@@ -119,6 +119,25 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
   than inferred from the two lists agreeing. An assigned employee with no
   `employee_map` row can't be enrolled at all and is surfaced with its cause —
   missing from the roster, or a contested PIN deliberately left unmapped.
+- **The command queue is a mailbox, not a setting** (`App\Sync\CommandQueue`,
+  `devices/{device}/queue`). Re-pointing a reader at the wrong
+  `payroll_device_code` makes the reconciler queue a delete for every user on it,
+  and correcting the link afterwards does *not* take those back — the device
+  collects and obeys whatever is in `device_commands`. Observed live: a reader
+  pointed at an empty test device queued 1,249 deletions, and clearing the link
+  left all 1,249 in place. Two rules govern calling them back, and both are
+  load-bearing:
+  - **Only `pending` is cancellable.** A `sent` row is already in the device's
+    hands; deleting it would destroy the record of what went out while changing
+    nothing on the machine, making the screen understate the damage rather than
+    undo it. The UI offers no tick-box on those rows at all.
+  - **Cancelling an add must also delete its `device_enrollment` row.** The
+    reconciler writes that row when it *queues* the add (see the invariant
+    above), so a cancelled add leaves a row claiming the person was sent; the
+    next reconcile finds nothing owed and the person is silently absent from that
+    reader for good. Cancelled *removals* need no repair — the reconciler already
+    dropped the enrollment row, which is exactly the "still on the machine, no
+    longer managed here" state that cancelling one is asking for.
 - **Punch dedup is at the DB.** Ingest uses `insertOrIgnore` against a unique index
   on `(sn, employee_id, timestamp)`, so device re-sends (after a reconnect) are
   dropped silently while still acknowledged to the device.
@@ -133,9 +152,20 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
 
 ### Layers / conventions
 
+- **Three screens answer three *different* "who is on this clock" questions, and
+  merging any two of them loses the thing that makes it useful.**
+  `DeviceRoster` (`devices/{device}/people`) is per *physical reader*: payroll's
+  assignments against what this server has sent it. `TimekeeperDirectory`
+  (`devices/timekeepers`) is per *DMPI device code*, and is the only one
+  answerable **before** a reader is linked — without it a live reader could be
+  pointed at an empty test entry and quietly emptied, because the only way to see
+  what was behind that entry was to commit to it. It deliberately reports no
+  enrollment state: a payroll device may have two readers linked or none, so
+  there is no single "enrolled" answer to give. `DeviceQueue`
+  (`devices/{device}/queue`) is what the reader has *not yet been told*.
 - **`app/Queries/`** centralizes "how do we slice this data" rules
   (`AttendanceQuery`, `LogQuery`, `DashboardStats`, `EmployeeDirectory`,
-  `DeviceRoster`). The same
+  `DeviceRoster`, `TimekeeperDirectory`, `DeviceQueue`). The same
   query object backs both the Blade page and its yajra/DataTables server-side AJAX
   endpoint, so filter rules live in one place and are unit-tested independently of
   HTTP. When adding a filterable/exportable screen, add the filter logic here.
@@ -220,6 +250,20 @@ stay **outside** it on purpose and must never be added to that group:
 `/iclock/*` (device push protocol — devices can't log in) and `/healthz`
 (machine-readable status for external uptime monitors). Login attempts are
 rate-limited (`throttle:5,1`).
+
+### Running things in the container
+
+**Never run artisan as root inside the container.** `sail artisan …` runs as the
+app user (`-u sail`); a bare `sail exec …` / `docker compose exec …` runs as
+**root**. Anything artisan does as root leaves root-owned files in
+`storage/framework/cache`, which the app user then cannot open — and because
+every scheduled job holds a cache lock for `withoutOverlapping()`, that single
+permission error kills all five *before they start*. Punches stop reaching
+payroll while the Scheduler page reports "Running, but no job has ever run" — an
+accurate message with no way to say why. Seen in the field, traced to
+`install.sh`/`update.sh` starting `schedule:work` without `-u sail`; both now
+pass it, and `update.sh` also repairs existing ownership. The manual repair is
+`sail exec -u root laravel.test chown -R sail storage bootstrap/cache`.
 
 ### Frontend
 

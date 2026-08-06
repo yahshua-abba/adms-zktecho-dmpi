@@ -83,7 +83,8 @@
         <div class="small mb-0">
             <strong>On the clock</strong> means this server has sent the person to the device.
             @if ($summary['queued'])
-                <strong class="text-warning-emphasis">{{ $summary['queued'] }} change(s) are still queued</strong> —
+                <a href="{{ route('devices.queue', $device->id) }}" class="text-decoration-none">
+                    <strong class="text-warning-emphasis">{{ $summary['queued'] }} change(s) are still queued</strong></a> —
                 the device picks them up the next time it connects, so those people aren't on it yet.
             @else
                 Nothing is queued for this device right now.

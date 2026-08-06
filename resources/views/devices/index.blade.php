@@ -105,12 +105,19 @@
                         </span>
                     @endif
                 </div>
-                @if (count($payrollDevices))
-                    <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#payroll-devices">
-                        Show list
-                    </button>
-                @endif
+                <div class="d-flex flex-wrap gap-2">
+                    {{-- Shown even with nothing downloaded: the screen explains how to
+                         populate itself, which is more use than a hidden button. --}}
+                    <a class="btn btn-sm btn-outline-primary" href="{{ route('devices.timekeepers') }}">
+                        <i class="bi bi-people"></i> See who's on each
+                    </a>
+                    @if (count($payrollDevices))
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#payroll-devices">
+                            Show list
+                        </button>
+                    @endif
+                </div>
             </div>
 
             @if (count($payrollDevices))
@@ -118,7 +125,7 @@
                     <div class="table-responsive" style="max-height: 22rem; overflow-y: auto;">
                         <table class="table table-sm table-hover align-middle mb-0">
                             <thead class="sticky-top bg-body">
-                                <tr><th>Code</th><th>Location</th><th>Clock connected here</th></tr>
+                                <tr><th>Code</th><th>Location</th><th>Clock connected here</th><th></th></tr>
                             </thead>
                             <tbody>
                                 @foreach ($payrollDevices as $pd)
@@ -131,6 +138,10 @@
                                             @empty
                                                 <span class="text-muted">—</span>
                                             @endforelse
+                                        </td>
+                                        <td class="text-end">
+                                            <a href="{{ route('devices.timekeepers.show', ['code' => $pd->code]) }}"
+                                               class="text-decoration-none small">View people</a>
                                         </td>
                                     </tr>
                                 @endforeach
@@ -229,8 +240,14 @@
                                 @if ($people['blocked'])
                                     <span class="badge bg-danger" title="Assigned in payroll but with no employee record here — they cannot be enrolled">{{ $people['blocked'] }} can't be added</span>
                                 @endif
+                                {{-- Clickable: this number is where a wrong link first shows
+                                     itself, and the queue screen behind it is the only place
+                                     any of it can be called back. --}}
                                 @if ($people['queued'])
-                                    <span class="badge bg-warning text-dark" title="Changes waiting for this device to connect and collect them">{{ $people['queued'] }} queued</span>
+                                    <a href="{{ route('devices.queue', $d->id) }}" class="text-decoration-none"
+                                       title="Changes waiting for this device to connect and collect them — open to review or cancel">
+                                        <span class="badge bg-warning text-dark">{{ $people['queued'] }} queued</span>
+                                    </a>
                                 @endif
                             </td>
                             <td data-status-sn="{{ $d->no_sn }}">
