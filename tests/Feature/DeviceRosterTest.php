@@ -64,17 +64,38 @@ class DeviceRosterTest extends TestCase
         $this->assertSame(1, $counts['blocked']);
     }
 
-    public function test_counts_include_changes_still_queued_for_the_device(): void
+    /**
+     * Waiting and unconfirmed are counted apart, never summed. Only the first is
+     * outstanding work this server can still call back; the second is already the
+     * device's business. A clock that stops confirming carries its unconfirmed
+     * count for ever, so a single total would read as a permanent backlog.
+     */
+    public function test_counts_separate_what_is_waiting_from_what_was_already_sent(): void
     {
         $device = $this->device();
         DeviceCommand::create(['device_sn' => 'DEV-1', 'body' => 'DATA UPDATE USERINFO PIN=5_1', 'status' => 'pending']);
         DeviceCommand::create(['device_sn' => 'DEV-1', 'body' => 'DATA DELETE USERINFO PIN=5_2', 'status' => 'sent']);
+        DeviceCommand::create(['device_sn' => 'DEV-1', 'body' => 'DATA DELETE USERINFO PIN=5_4', 'status' => 'sent']);
         DeviceCommand::create(['device_sn' => 'DEV-1', 'body' => 'DATA UPDATE USERINFO PIN=5_3', 'status' => 'done']);
 
         $counts = DeviceRoster::counts(collect([$device]))['DEV-1'];
 
-        // Only what the device still owes us — a completed command is not pending.
-        $this->assertSame(2, $counts['queued']);
+        $this->assertSame(1, $counts['waiting']);
+        $this->assertSame(2, $counts['unconfirmed']);
+        // A completed command is neither.
+        $this->assertArrayNotHasKey('queued', $counts);
+    }
+
+    /** The field case: everything delivered, nothing outstanding, and it must say so. */
+    public function test_a_fully_delivered_queue_reports_nothing_waiting(): void
+    {
+        $device = $this->device();
+        DeviceCommand::create(['device_sn' => 'DEV-1', 'body' => 'DATA DELETE USERINFO PIN=5_1', 'status' => 'sent']);
+
+        $counts = DeviceRoster::counts(collect([$device]))['DEV-1'];
+
+        $this->assertSame(0, $counts['waiting']);
+        $this->assertSame(1, $counts['unconfirmed']);
     }
 
     public function test_two_clocks_on_the_same_payroll_code_each_report_that_codes_assignments(): void

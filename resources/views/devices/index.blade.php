@@ -224,7 +224,7 @@
                                  owed or a person can't be enrolled, and that disagreement is
                                  what an operator needs to see. Full breakdown one click away.
                                  See App\Queries\DeviceRoster. --}}
-                            @php ($people = $peopleCounts[$d->no_sn] ?? ['on_clock' => 0, 'assigned' => 0, 'blocked' => 0, 'queued' => 0, 'linked' => false])
+                            @php ($people = $peopleCounts[$d->no_sn] ?? ['on_clock' => 0, 'assigned' => 0, 'blocked' => 0, 'waiting' => 0, 'unconfirmed' => 0, 'linked' => false])
                             <td>
                                 <a href="{{ route('devices.people', $d->id) }}" class="text-decoration-none" title="See who is on this clock">
                                     <span class="fs-6 fw-semibold">{{ $people['on_clock'] }}</span>
@@ -240,13 +240,22 @@
                                 @if ($people['blocked'])
                                     <span class="badge bg-danger" title="Assigned in payroll but with no employee record here — they cannot be enrolled">{{ $people['blocked'] }} can't be added</span>
                                 @endif
-                                {{-- Clickable: this number is where a wrong link first shows
-                                     itself, and the queue screen behind it is the only place
-                                     any of it can be called back. --}}
-                                @if ($people['queued'])
+                            {{-- Two badges, never one total. "Waiting" is work this server
+                                 still owes the clock and can still call back; "unconfirmed"
+                                 is already delivered and can't be. Summed under one label
+                                 they read as outstanding work, and a clock that stops
+                                 confirming carries that number for ever. Both link to the
+                                 queue, which is the only place any of it can be acted on. --}}
+                                @if ($people['waiting'])
                                     <a href="{{ route('devices.queue', $d->id) }}" class="text-decoration-none"
-                                       title="Changes waiting for this device to connect and collect them — open to review or cancel">
-                                        <span class="badge bg-warning text-dark">{{ $people['queued'] }} queued</span>
+                                       title="Changes still in this device's mailbox — it collects them next time it connects. These can still be cancelled.">
+                                        <span class="badge bg-warning text-dark">{{ number_format($people['waiting']) }} waiting</span>
+                                    </a>
+                                @endif
+                                @if ($people['unconfirmed'])
+                                    <a href="{{ route('devices.queue', $d->id) }}" class="text-decoration-none"
+                                       title="Already handed to the device, which never reported back whether it carried them out. Nothing is outstanding on this server's side and these cannot be cancelled.">
+                                        <span class="badge bg-secondary">{{ number_format($people['unconfirmed']) }} unconfirmed</span>
                                     </a>
                                 @endif
                             </td>

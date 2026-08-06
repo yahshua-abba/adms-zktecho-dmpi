@@ -43,6 +43,29 @@ class UiPagesTest extends TestCase
         $response->assertSee('Device PIN');
     }
 
+    /**
+     * The Help page is the only place several of these behaviours are written
+     * down, and each was learned from an incident rather than from the code:
+     * a reader emptied by a wrong link, a scheduler killed by a root-owned cache
+     * file, and a "queued" count that never cleared. A screen shipping without
+     * its entry here is how the next person repeats it.
+     */
+    public function test_help_page_documents_the_queue_and_timekeeper_screens(): void
+    {
+        $response = $this->get('/help');
+
+        $response->assertOk();
+        // The screens themselves.
+        $response->assertSee('Timekeeper devices');
+        $response->assertSee('Cancel picked');
+        // The two counts that must never be conflated.
+        $response->assertSee('Waiting vs unconfirmed');
+        // The failure modes.
+        $response->assertSee('Running, but no job has ever run', false);
+        $response->assertSee('A clock emptied itself');
+        $response->assertSee('Linking is the dangerous move, not unlinking');
+    }
+
     public function test_employees_page_lists_mapped_and_unmapped(): void
     {
         EmployeeMap::create(['device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968', 'payroll_employee_id' => 48213, 'name' => 'ABABA, Rubelyn', 'rfid' => '1996052557']);

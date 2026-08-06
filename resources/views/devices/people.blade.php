@@ -82,10 +82,16 @@
         <i class="bi bi-info-circle fs-5 text-muted"></i>
         <div class="small mb-0">
             <strong>On the clock</strong> means this server has sent the person to the device.
+            {{-- "Unconfirmed", not "queued": the count covers changes still in the
+                 mailbox AND ones already handed over that the clock never reported
+                 back on. Only the first are waiting for a connection, so promising
+                 that all of them are lands an operator on the queue screen looking
+                 for something to cancel that isn't there. --}}
             @if ($summary['queued'])
                 <a href="{{ route('devices.queue', $device->id) }}" class="text-decoration-none">
-                    <strong class="text-warning-emphasis">{{ $summary['queued'] }} change(s) are still queued</strong></a> —
-                the device picks them up the next time it connects, so those people aren't on it yet.
+                    <strong class="text-warning-emphasis">{{ $summary['queued'] }} person/people have a change the clock hasn't confirmed</strong></a> —
+                either still waiting to be collected, or already sent with no result reported back.
+                Open the queue to see which.
             @else
                 Nothing is queued for this device right now.
             @endif
