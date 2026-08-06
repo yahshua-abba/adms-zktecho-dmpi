@@ -59,6 +59,16 @@ fi
 step "Build and restart Sail"
 ./vendor/bin/sail up -d --build
 
+# BEFORE the first artisan call, not after. This script runs with `set -e`, and
+# an artisan command on a box with root-owned files in storage dies on the
+# permission error — so a repair placed later never runs on the one box that
+# needs it. Repair, not just prevention: passing -u sail to the scheduler below
+# does nothing about files an earlier update already left behind. Idempotent —
+# on a healthy install it changes nothing.
+step "Give storage back to the app user"
+./vendor/bin/sail exec -T -u root laravel.test chown -R sail storage bootstrap/cache
+./vendor/bin/sail exec -T -u root laravel.test chmod -R ug+rwX storage bootstrap/cache
+
 step "Wait for the database"
 wait_for_database
 
@@ -68,18 +78,14 @@ step "Run database migrations"
 step "Clear Laravel caches"
 ./vendor/bin/sail artisan optimize:clear
 
-# Repair, not just prevention: fixing the scheduler's start user below does
-# nothing for a box that already has root-owned files in storage from an earlier
-# update. Idempotent — on a healthy install it changes nothing.
-step "Give storage back to the app user"
-./vendor/bin/sail exec -T -u root laravel.test chown -R sail storage bootstrap/cache
-./vendor/bin/sail exec -T -u root laravel.test chmod -R ug+rwX storage bootstrap/cache
-
-# -u sail is load-bearing — see the same call in install.sh for what a root-owned
-# cache does to every scheduled job.
-step "Start the scheduler if it is not already running"
-./vendor/bin/sail exec -T -u sail laravel.test sh -lc \
-    "if ! pgrep -f '[a]rtisan schedule:work' >/dev/null; then nohup php artisan schedule:work >> storage/logs/scheduler.log 2>&1 & fi"
+# -u sail is load-bearing, and so is the two-call split — see install.sh for why.
+step "Start the scheduler as the app user"
+./vendor/bin/sail exec -T -u root laravel.test sh -lc \
+    "if ! pgrep -u sail -f '[a]rtisan schedule:work' >/dev/null 2>&1; then pkill -f '[a]rtisan schedule:work' >/dev/null 2>&1 || true; sleep 1; fi"
+if ! ./vendor/bin/sail exec -T -u sail laravel.test pgrep -f '[a]rtisan schedule:work' >/dev/null 2>&1; then
+    ./vendor/bin/sail exec -T -u sail laravel.test sh -lc \
+        "nohup php artisan schedule:work >> storage/logs/scheduler.log 2>&1 &"
+fi
 
 step "Final checks"
 ./vendor/bin/sail ps

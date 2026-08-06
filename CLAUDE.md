@@ -265,10 +265,26 @@ app user (`-u sail`); a bare `sail exec …` / `docker compose exec …` runs as
 every scheduled job holds a cache lock for `withoutOverlapping()`, that single
 permission error kills all five *before they start*. Punches stop reaching
 payroll while the Scheduler page reports "Running, but no job has ever run" — an
-accurate message with no way to say why. Seen in the field, traced to
-`install.sh`/`update.sh` starting `schedule:work` without `-u sail`; both now
-pass it, and `update.sh` also repairs existing ownership. The manual repair is
+accurate message with no way to say why. Seen in the field. The manual repair is
 `sail exec -u root laravel.test chown -R sail storage bootstrap/cache`.
+
+Three rules the install/update scripts now follow, each of which was broken:
+
+- **Repair ownership before the first artisan call.** The scripts run with
+  `set -e`, so an artisan command that hits a root-owned file aborts the run —
+  a repair placed after it never executes on the one box that needs it.
+- **`schedule:work` starts with `-u sail`, and a scheduler not owned by `sail`
+  is stopped first.** `pgrep -f` matches the command line, not the owner, so a
+  root-owned leftover satisfies a naive "is one running?" guard forever. Root
+  does the stopping (the app user cannot signal root's processes); the app user
+  does the starting.
+- **The guard runs in its own `exec` call, never in the same shell as the
+  `nohup php artisan schedule:work` it protects.** Otherwise that shell's own
+  command line contains the searched-for text, `pgrep -f` matches the shell, and
+  the step silently starts nothing — verified against a box with no scheduler at
+  all. The bracketed `[a]rtisan` only stops pgrep matching the *pattern*, not a
+  literal copy sitting in the payload. Until this was fixed the step had never
+  once started a scheduler; every running one came from `SchedulerGuard`.
 
 ### Frontend
 
