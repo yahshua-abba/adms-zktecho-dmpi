@@ -119,6 +119,13 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
   than inferred from the two lists agreeing. An assigned employee with no
   `employee_map` row can't be enrolled at all and is surfaced with its cause —
   missing from the roster, or a contested PIN deliberately left unmapped.
+  For the same reason the Devices list reports **`waiting` and `unconfirmed`
+  separately and must never sum them**: `pending` has not left this server and
+  can still be cancelled, `sent` is already the device's business. A clock that
+  stops reporting results keeps its `sent` rows for ever (they are deliberately
+  never pruned by age), so one combined "queued" figure becomes a permanent
+  phantom backlog — observed as "1,249 queued" on a reader whose last
+  instruction had been delivered two days earlier.
 - **The command queue is a mailbox, not a setting** (`App\Sync\CommandQueue`,
   `devices/{device}/queue`). Re-pointing a reader at the wrong
   `payroll_device_code` makes the reconciler queue a delete for every user on it,

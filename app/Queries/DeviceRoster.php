@@ -65,8 +65,8 @@ class DeviceRoster
      * clock that has ever checked in).
      *
      * @param  iterable<Device>  $devices
-     * @return Collection<string, array{on_clock:int,assigned:int,blocked:int,queued:int,linked:bool}>
-     *                                                                                                 keyed by device serial
+     * @return Collection<string, array{on_clock:int,assigned:int,blocked:int,waiting:int,unconfirmed:int,linked:bool}>
+     *                                                                                                                  keyed by device serial
      */
     public static function counts(iterable $devices): Collection
     {
@@ -86,14 +86,24 @@ class DeviceRoster
             ->groupBy('device_sn')
             ->pluck('total', 'device_sn');
 
-        // Changes this server still owes the clock. A long-offline reader can
-        // hold weeks of these, which is exactly when the counts above stop
-        // describing the machine on the wall.
-        $queued = DeviceCommand::whereIn('device_sn', $serials)
+        // Reported as two numbers, never one. They mean different things and only
+        // the first can still be acted on:
+        //   pending — never left this server, still cancellable
+        //   sent    — the device took it and never reported back
+        // Added together and labelled "queued" they read as outstanding work, and
+        // a clock that stops confirming carries that inflated number for ever
+        // (`sent` rows are deliberately never pruned by age). Observed: a reader
+        // showed "1,249 queued" for two days after the last instruction had been
+        // delivered, and sent an operator hurrying to cancel nothing.
+        $byStatus = DeviceCommand::whereIn('device_sn', $serials)
             ->whereIn('status', ['pending', 'sent'])
-            ->selectRaw('device_sn, count(*) as total')
-            ->groupBy('device_sn')
-            ->pluck('total', 'device_sn');
+            ->selectRaw('device_sn, status, count(*) as total')
+            ->groupBy('device_sn', 'status')
+            ->get()
+            ->groupBy('device_sn');
+
+        $waiting = $byStatus->map(fn ($rows) => (int) $rows->firstWhere('status', 'pending')?->total);
+        $unconfirmed = $byStatus->map(fn ($rows) => (int) $rows->firstWhere('status', 'sent')?->total);
 
         $assigned = $codes->isEmpty() ? collect() : DeviceAssignment::whereIn('device_code', $codes)
             ->selectRaw('device_code, count(*) as total')
@@ -115,7 +125,8 @@ class DeviceRoster
                 'on_clock' => (int) ($onClock[$d->no_sn] ?? 0),
                 'assigned' => (int) ($assigned[$d->payroll_device_code] ?? 0),
                 'blocked' => (int) ($blocked[$d->payroll_device_code] ?? 0),
-                'queued' => (int) ($queued[$d->no_sn] ?? 0),
+                'waiting' => (int) ($waiting[$d->no_sn] ?? 0),
+                'unconfirmed' => (int) ($unconfirmed[$d->no_sn] ?? 0),
                 'linked' => $d->payroll_device_code !== null,
             ],
         ]);
