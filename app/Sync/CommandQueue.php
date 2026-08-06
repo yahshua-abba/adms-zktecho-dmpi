@@ -54,28 +54,51 @@ class CommandQueue
         // Counted before the delete, so the caller can tell an operator that part
         // of their selection was already gone rather than silently doing less
         // than they asked.
-        $skipped = $ids === null
+        $alreadySent = $ids === null
             ? 0
             : (clone $scope())->where('status', '!=', DeviceQueue::PENDING)->count();
 
-        $pending = (clone $scope())->where('status', DeviceQueue::PENDING)->get();
+        $candidates = (clone $scope())->where('status', DeviceQueue::PENDING)->get();
 
-        if ($pending->isEmpty()) {
-            return ['cancelled' => 0, 'skipped' => $skipped, 'requeued' => 0];
+        if ($candidates->isEmpty()) {
+            return ['cancelled' => 0, 'skipped' => $alreadySent, 'requeued' => 0];
         }
 
-        // PINs whose *add* we are calling back — see rule 2 in the class docblock.
-        $addPins = $pending
-            ->filter(fn (DeviceCommand $c) => DeviceQueue::action($c->body) === DeviceQueue::ADD)
-            ->map(fn (DeviceCommand $c) => DeviceQueue::pin($c->body))
-            ->filter()
-            ->unique()
-            ->values();
-
+        $cancelled = 0;
         $requeued = 0;
+        $raced = 0;
 
-        DB::transaction(function () use ($device, $pending, $addPins, &$requeued) {
-            DeviceCommand::whereIn('id', $pending->pluck('id'))->delete();
+        DB::transaction(function () use ($device, $candidates, &$cancelled, &$requeued, &$raced) {
+            $candidateIds = $candidates->pluck('id');
+
+            // Guarded by status, not by id alone. `getrequest` flips rows from
+            // pending to sent whenever the device polls — every 30s per device,
+            // and this runs against queues thousands of rows long — so a row read
+            // as pending a moment ago may be in the device's hands by now.
+            // Deleting it on the strength of the earlier read is exactly the
+            // silent damage rule 1 exists to prevent.
+            $cancelled = DeviceCommand::whereIn('id', $candidateIds)
+                ->where('status', DeviceQueue::PENDING)
+                ->delete();
+
+            // Which candidates the guard turned away. Read back rather than
+            // locking the rows up front: `cancel all` on a wedged clock touches
+            // thousands of rows, and holding those locks would stall the very
+            // `getrequest` that is draining the queue.
+            $survived = DeviceCommand::whereIn('id', $candidateIds)->pluck('id')->flip();
+            $raced = $survived->count();
+
+            // PINs whose *add* we actually called back — see rule 2. Narrowed to
+            // the rows that really went: repairing the enrollment for a row still
+            // on its way to the device would tell this server the person was
+            // never sent while the device is being told to add them.
+            $addPins = $candidates
+                ->reject(fn (DeviceCommand $c) => $survived->has($c->id))
+                ->filter(fn (DeviceCommand $c) => DeviceQueue::action($c->body) === DeviceQueue::ADD)
+                ->map(fn (DeviceCommand $c) => DeviceQueue::pin($c->body))
+                ->filter()
+                ->unique()
+                ->values();
 
             if ($addPins->isNotEmpty()) {
                 $requeued = DeviceEnrollment::where('device_sn', $device->no_sn)
@@ -84,6 +107,9 @@ class CommandQueue
             }
         });
 
-        return ['cancelled' => $pending->count(), 'skipped' => $skipped, 'requeued' => $requeued];
+        // Rows that raced away are reported alongside the ones that were already
+        // sent when we looked: from the operator's side they are the same fact —
+        // asked for, not cancelled, now the device's business.
+        return ['cancelled' => $cancelled, 'skipped' => $alreadySent + $raced, 'requeued' => $requeued];
     }
 }

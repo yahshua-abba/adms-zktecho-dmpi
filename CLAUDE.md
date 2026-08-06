@@ -127,10 +127,15 @@ not touch the MySQL container. To swap the payroll HTTP client in a test, bind
   pointed at an empty test device queued 1,249 deletions, and clearing the link
   left all 1,249 in place. Two rules govern calling them back, and both are
   load-bearing:
-  - **Only `pending` is cancellable.** A `sent` row is already in the device's
-    hands; deleting it would destroy the record of what went out while changing
-    nothing on the machine, making the screen understate the damage rather than
-    undo it. The UI offers no tick-box on those rows at all.
+  - **Only `pending` is cancellable, and the status is re-asserted in the
+    `delete` itself.** A `sent` row is already in the device's hands; deleting it
+    would destroy the record of what went out while changing nothing on the
+    machine, making the screen understate the damage rather than undo it. The UI
+    offers no tick-box on those rows — but `getrequest` flips rows to `sent`
+    whenever a device polls, so selecting the pending rows and then deleting them
+    *by id* reintroduces the bug in the gap between the two queries. The rows
+    that raced away are read back and reported as skipped rather than silently
+    dropped, and they are excluded from the enrollment repair below.
   - **Cancelling an add must also delete its `device_enrollment` row.** The
     reconciler writes that row when it *queues* the add (see the invariant
     above), so a cancelled add leaves a row claiming the person was sent; the

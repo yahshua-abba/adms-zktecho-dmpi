@@ -12,6 +12,7 @@ use App\Queries\DeviceQueue;
 use App\Sync\CommandQueue;
 use App\Sync\EnrollmentReconciler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class DeviceQueueTest extends TestCase
@@ -182,6 +183,46 @@ class DeviceQueueTest extends TestCase
         $this->assertDatabaseHas('device_enrollment', ['device_sn' => 'DEV1', 'pin' => '5_1']);
     }
 
+    /**
+     * The device flips rows pending -> sent in `getrequest` whenever it polls, so
+     * a row read as pending can be in its hands before the delete runs. Deleting
+     * it on the strength of the earlier read would destroy the record of what
+     * went out, and — for an add — drop the enrollment row while the device is
+     * being told to add that person.
+     *
+     * DB::listen fires after each query, so flipping the row when the candidate
+     * SELECT completes lands the test in exactly that window.
+     */
+    public function test_a_command_the_device_collects_mid_cancel_survives(): void
+    {
+        $device = $this->device();
+        DeviceEnrollment::create(['device_sn' => 'DEV1', 'pin' => '5_4968', 'name' => 'Rubelyn', 'card' => '[1]']);
+        $command = $this->add('5_4968');
+
+        $fired = false;
+        DB::listen(function ($query) use (&$fired, $command) {
+            if ($fired || ! str_contains($query->sql, 'device_commands')) {
+                return;
+            }
+            if (! str_starts_with(strtolower(ltrim($query->sql)), 'select')) {
+                return;
+            }
+            $fired = true;
+            DB::table('device_commands')->where('id', $command->id)->update(['status' => 'sent']);
+        });
+
+        $result = (new CommandQueue)->cancel($device);
+
+        $this->assertTrue($fired, 'the race was never simulated — the test no longer proves anything');
+        $this->assertSame(0, $result['cancelled']);
+        $this->assertSame(1, $result['skipped'], 'a row that raced away is still "asked for, not cancelled"');
+        $this->assertSame(0, $result['requeued']);
+
+        $this->assertDatabaseHas('device_commands', ['id' => $command->id, 'status' => 'sent']);
+        // The enrollment repair must not run for a row still on its way out.
+        $this->assertDatabaseHas('device_enrollment', ['device_sn' => 'DEV1', 'pin' => '5_4968']);
+    }
+
     public function test_cancelling_leaves_other_devices_alone(): void
     {
         $device = $this->device();
@@ -217,6 +258,22 @@ class DeviceQueueTest extends TestCase
         $device = $this->device();
 
         $this->guest()->get(route('devices.queue', $device->id))->assertRedirect(route('login'));
+    }
+
+    /**
+     * Asserted separately from the GET above: this is the destructive half, and
+     * its protection is currently structural (both routes sit in the same
+     * auth.admin group). Moving one out would otherwise be caught by nothing.
+     */
+    public function test_cancelling_requires_login(): void
+    {
+        $device = $this->device();
+        $command = $this->remove('5_1');
+
+        $this->guest()->post(route('devices.queue.cancel', $device->id))
+            ->assertRedirect(route('login'));
+
+        $this->assertDatabaseHas('device_commands', ['id' => $command->id]);
     }
 
     public function test_cancel_all_through_the_screen(): void
