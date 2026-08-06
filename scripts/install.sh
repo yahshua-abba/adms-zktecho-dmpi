@@ -41,6 +41,14 @@ docker run --rm \
 step "Build and start Sail"
 ./vendor/bin/sail up -d --build
 
+# Before the first artisan call. A first install has nothing to repair, but this
+# script is re-runnable and is what someone reaches for when a box is in a bad
+# state — and with `set -e`, an artisan command that hits a root-owned file in
+# storage aborts the run before any later repair could execute.
+step "Give storage back to the app user"
+./vendor/bin/sail exec -T -u root laravel.test chown -R sail storage bootstrap/cache
+./vendor/bin/sail exec -T -u root laravel.test chmod -R ug+rwX storage bootstrap/cache
+
 step "Install and build frontend assets"
 ./vendor/bin/sail npm install
 ./vendor/bin/sail npm run build
@@ -61,9 +69,33 @@ step "Run database migrations"
 step "Clear Laravel caches"
 ./vendor/bin/sail artisan optimize:clear
 
-step "Start the scheduler"
-./vendor/bin/sail exec -T laravel.test sh -lc \
-    "if ! pgrep -f '[a]rtisan schedule:work' >/dev/null; then nohup php artisan schedule:work >> storage/logs/scheduler.log 2>&1 & fi"
+# -u sail is load-bearing. `sail exec` with no user runs as ROOT, and a scheduler
+# started that way writes root-owned files into storage/framework/cache — which
+# the dashboard and the watchdog-started scheduler (both the app user) then can't
+# open. Every job here holds a cache lock to avoid overlapping itself, so that one
+# permission error stops all five before they start: punches stop reaching
+# payroll, and the Scheduler page reads "Running, but no job has ever run".
+# Observed in the field.
+#
+# Two calls, and the split matters. `pgrep -f` matches the command line only, not
+# the owner, so a root-owned scheduler left over from an older install satisfies
+# the "one is already running" guard — the correct one never starts and the box
+# keeps making root-owned files forever. Root has to do the stopping, since the
+# app user cannot signal root's processes; the app user does the starting.
+# The check runs in its OWN exec call, and that is not cosmetic. Putting the
+# guard and `nohup php artisan schedule:work` in one shell puts the searched-for
+# text on that shell's own command line, so `pgrep -f` finds the shell, concludes
+# a scheduler is already running, and starts nothing. Verified against a box with
+# no scheduler at all: the previous one-liner reported one was running, which
+# means this step had never once started a scheduler. The bracketed `[a]rtisan`
+# only stops pgrep matching the pattern itself, not the literal in the payload.
+step "Start the scheduler as the app user"
+./vendor/bin/sail exec -T -u root laravel.test sh -lc \
+    "if ! pgrep -u sail -f '[a]rtisan schedule:work' >/dev/null 2>&1; then pkill -f '[a]rtisan schedule:work' >/dev/null 2>&1 || true; sleep 1; fi"
+if ! ./vendor/bin/sail exec -T -u sail laravel.test pgrep -f '[a]rtisan schedule:work' >/dev/null 2>&1; then
+    ./vendor/bin/sail exec -T -u sail laravel.test sh -lc \
+        "nohup php artisan schedule:work >> storage/logs/scheduler.log 2>&1 &"
+fi
 
 step "Final checks"
 ./vendor/bin/sail ps

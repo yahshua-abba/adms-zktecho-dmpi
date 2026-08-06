@@ -20,6 +20,7 @@ use App\Http\Controllers\MonitoringController;
 use App\Http\Controllers\SchedulerLogController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SyncStatusController;
+use App\Http\Controllers\TimekeeperController;
 use Illuminate\Support\Facades\Route;
 
 // Login: no users table, just the single .env-configured admin (see
@@ -55,6 +56,15 @@ Route::middleware('auth.admin')->group(function () {
     // What the background scheduler has been doing — one row per job run.
     Route::get('scheduler-log', [SchedulerLogController::class, 'index'])->name('scheduler.log');
     Route::get('devices', [DeviceController::class, 'Index'])->name('devices.index');
+    // DMPI's own device list and who it assigns to each — payroll's view, which
+    // can be read for a door BEFORE a reader is linked to it. Registered ahead of
+    // the devices/{device}/* routes so "timekeepers" is never taken for a device
+    // key. Named devices.* so the sidebar highlights Devices. See
+    // App\Queries\TimekeeperDirectory.
+    Route::get('devices/timekeepers', [TimekeeperController::class, 'index'])->name('devices.timekeepers');
+    Route::get('devices/timekeepers/{code}', [TimekeeperController::class, 'show'])
+        ->where('code', '[^/]+')
+        ->name('devices.timekeepers.show');
     Route::get('devices-status', [DeviceController::class, 'status'])->name('devices.status');
     Route::patch('devices/{device}', [DeviceController::class, 'update'])->name('devices.update');
     // Removing a clock keeps its punches — see DeviceController::destroy.
@@ -63,6 +73,12 @@ Route::middleware('auth.admin')->group(function () {
     // Who is on one clock — payroll's assignments and what this server has sent,
     // side by side. See App\Queries\DeviceRoster.
     Route::get('devices/{device}/people', [DeviceController::class, 'people'])->name('devices.people');
+    // What this server still owes one clock, and the only way to call any of it
+    // back. Re-pointing a device at the wrong payroll code queues a removal for
+    // every user on it, and fixing the link does NOT take those back — the queue
+    // is a mailbox, not a setting. See App\Sync\CommandQueue.
+    Route::get('devices/{device}/queue', [DeviceController::class, 'queue'])->name('devices.queue');
+    Route::post('devices/{device}/queue/cancel', [DeviceController::class, 'cancelQueue'])->name('devices.queue.cancel');
     Route::get('devices/{device}/logs', [DeviceController::class, 'DevicePunchLog'])->name('devices.PunchLog');
     Route::get('devices-log', [DeviceController::class, 'DeviceLog'])->name('devices.DeviceLog');
     Route::get('finger-log', [DeviceController::class, 'FingerLog'])->name('devices.FingerLog');

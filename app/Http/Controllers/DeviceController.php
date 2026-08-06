@@ -10,10 +10,12 @@ use App\Models\DeviceEnrollment;
 use App\Models\EmployeeMap;
 use App\Models\PayrollDevice;
 use App\Queries\AttendanceQuery;
+use App\Queries\DeviceQueue;
 use App\Queries\DeviceRoster;
 use App\Queries\LogQuery;
 use App\Support\PerPage;
 use App\Sync\AttendanceSync;
+use App\Sync\CommandQueue;
 use App\Sync\DmpiSyncLauncher;
 use App\Sync\EnrollmentReconciler;
 use Illuminate\Http\Request;
@@ -489,6 +491,70 @@ class DeviceController extends Controller
         $reconciler->reconcileDevice($device->no_sn);
 
         return redirect()->route('devices.index')->with('success', "Enrollment queued for {$device->no_sn}.");
+    }
+
+    /**
+     * What this server still owes one clock. See App\Queries\DeviceQueue.
+     *
+     * Reached from the "N queued" badge on the Devices list, which is where the
+     * number is first noticed and where there was previously nowhere to go next.
+     */
+    public function queue(Request $request, Device $device)
+    {
+        $perPage = PerPage::resolve($request->has('per_page') ? (int) $request->query('per_page') : null);
+
+        return view('devices.queue', [
+            'device' => $device,
+            'counts' => DeviceQueue::counts($device),
+            'commands' => DeviceQueue::commands($device, $request->only(['status', 'action']), $perPage)
+                ->appends($request->query()),
+            'status' => $request->query('status'),
+            'action' => $request->query('action'),
+        ]);
+    }
+
+    /**
+     * Call back queued instructions — the whole pending queue, or picked rows.
+     *
+     * The safety rules (only `pending` can be cancelled; a cancelled add must
+     * also drop its enrollment row) live in App\Sync\CommandQueue, not here,
+     * because they are properties of the queue rather than of this screen.
+     */
+    public function cancelQueue(Request $request, Device $device, CommandQueue $queue)
+    {
+        $validated = $request->validate([
+            'ids' => ['nullable', 'array'],
+            'ids.*' => ['integer'],
+        ]);
+
+        $result = $queue->cancel($device, $validated['ids'] ?? null);
+
+        if ($result['cancelled'] === 0) {
+            return redirect()->route('devices.queue', $device->id)
+                ->with('error', $result['skipped'] > 0
+                    ? "Nothing was cancelled — all {$result['skipped']} of those instructions had already been handed to the device and can't be called back."
+                    : 'Nothing was cancelled — there was nothing waiting.');
+        }
+
+        $message = "Cancelled {$result['cancelled']} queued instruction(s) for {$device->no_sn}.";
+
+        if ($result['skipped'] > 0) {
+            $message .= " {$result['skipped']} had already been handed to the device and couldn't be called back.";
+        }
+
+        // Said out loud because it changes what the next automatic run will do,
+        // and an operator who cancelled an add deserves to know it will come
+        // back rather than discovering the person missing a week later.
+        if ($result['requeued'] > 0) {
+            $message .= " {$result['requeued']} person(s) are no longer recorded as sent to this clock, so the next enrollment sync will queue them again if payroll still assigns them.";
+        }
+
+        ActivityLog::record('device.queue-cancelled', $message, 'warning', [
+            'device_sn' => $device->no_sn,
+            'cancelled' => $result['cancelled'],
+        ]);
+
+        return redirect()->route('devices.queue', $device->id)->with('success', $message);
     }
 
     // Punches recorded by one device — reuse the filtered Attendance screen.
