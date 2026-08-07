@@ -505,14 +505,36 @@ class DeviceController extends Controller
     public function queue(Request $request, Device $device)
     {
         $perPage = PerPage::resolve($request->has('per_page') ? (int) $request->query('per_page') : null);
+        $counts = DeviceQueue::counts($device);
 
         return view('devices.queue', [
             'device' => $device,
-            'counts' => DeviceQueue::counts($device),
+            'counts' => $counts,
+            'progress' => DeviceQueue::progress($device, $counts),
             'commands' => DeviceQueue::commands($device, $request->only(['status', 'action']), $perPage)
                 ->appends($request->query()),
             'status' => $request->query('status'),
             'action' => $request->query('action'),
+        ]);
+    }
+
+    /** Small polling response used by the open queue screen. */
+    public function queueStatus(Request $request, Device $device)
+    {
+        $ids = collect(explode(',', (string) $request->query('ids')))
+            ->filter(fn ($id) => ctype_digit($id))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->take(500)
+            ->values()
+            ->all();
+        $counts = DeviceQueue::counts($device);
+
+        return response()->json([
+            'counts' => $counts,
+            'progress' => DeviceQueue::progress($device, $counts),
+            'commands' => DeviceQueue::liveCommands($device, $ids),
+            'checked_at' => now()->format('Y-m-d H:i:s'),
         ]);
     }
 

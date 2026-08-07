@@ -57,6 +57,24 @@ class DeviceQueueTest extends TestCase
         $this->assertSame(5, $counts['total']);
     }
 
+    public function test_progress_separates_delivery_from_device_responses(): void
+    {
+        $device = $this->device();
+        $this->add('5_1');
+        $this->remove('5_2');
+        $this->command('DATA UPDATE USERINFO PIN=5_3', 'sent');
+        $this->command('DATA UPDATE USERINFO PIN=5_4', 'done');
+        $this->command('DATA UPDATE USERINFO PIN=5_5', 'failed');
+
+        $progress = DeviceQueue::progress($device);
+
+        $this->assertSame(5, $progress['total']);
+        $this->assertSame(3, $progress['delivered']);
+        $this->assertSame(2, $progress['responded']);
+        $this->assertSame(60, $progress['delivery_percent']);
+        $this->assertSame(40, $progress['response_percent']);
+    }
+
     public function test_commands_decode_the_pin_action_and_person(): void
     {
         $device = $this->device();
@@ -250,7 +268,49 @@ class DeviceQueueTest extends TestCase
             ->assertOk()
             ->assertSee('Remove from clock')
             ->assertSee('Rubelyn')
-            ->assertSee('Cancel all 1 waiting');
+            ->assertSee('Delivery progress')
+            ->assertSee('Device responses')
+            ->assertSee('Cancel all')
+            ->assertSee('data-cancel-all-count', false);
+    }
+
+    public function test_live_queue_status_returns_progress_and_requested_command_responses(): void
+    {
+        $device = $this->device();
+        $done = DeviceCommand::create([
+            'device_sn' => 'DEV1',
+            'body' => 'DATA UPDATE USERINFO PIN=5_1',
+            'status' => 'done',
+            'return_code' => 0,
+            'response' => 'ID=10&Return=0&CMD=DATA',
+            'sent_at' => now()->subSecond(),
+            'done_at' => now(),
+        ]);
+        $other = DeviceCommand::create([
+            'device_sn' => 'OTHER',
+            'body' => 'DATA UPDATE USERINFO PIN=5_2',
+            'status' => 'failed',
+            'return_code' => -1,
+        ]);
+
+        $this->getJson(route('devices.queue.status', [
+            'device' => $device->id,
+            'ids' => "{$done->id},{$other->id}",
+        ]))
+            ->assertOk()
+            ->assertJsonPath('progress.total', 1)
+            ->assertJsonPath('progress.delivered', 1)
+            ->assertJsonPath('progress.responded', 1)
+            ->assertJsonPath("commands.{$done->id}.status", 'done')
+            ->assertJsonPath("commands.{$done->id}.response", 'ID=10&Return=0&CMD=DATA')
+            ->assertJsonMissingPath("commands.{$other->id}");
+    }
+
+    public function test_live_queue_status_requires_login(): void
+    {
+        $device = $this->device();
+
+        $this->guest()->getJson(route('devices.queue.status', $device->id))->assertRedirect(route('login'));
     }
 
     public function test_queue_screen_requires_login(): void

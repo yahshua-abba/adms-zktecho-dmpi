@@ -60,6 +60,55 @@ class DeviceQueue
     }
 
     /**
+     * Two different checkpoints matter: leaving ADMS and hearing back from the
+     * clock. Calling both of them "synced" hid the exact failure operators are
+     * trying to find, so report them independently.
+     *
+     * @param  array<string,int>|null  $counts
+     */
+    public static function progress(Device $device, ?array $counts = null): array
+    {
+        $counts ??= self::counts($device);
+        $total = $counts['total'];
+        $delivered = $counts[self::SENT] + $counts[self::DONE] + $counts[self::FAILED];
+        $responded = $counts[self::DONE] + $counts[self::FAILED];
+
+        return [
+            'total' => $total,
+            'delivered' => $delivered,
+            'responded' => $responded,
+            'delivery_percent' => $total > 0 ? (int) round(($delivered / $total) * 100) : 0,
+            'response_percent' => $total > 0 ? (int) round(($responded / $total) * 100) : 0,
+        ];
+    }
+
+    /** Live row data for the commands currently visible in the browser. */
+    public static function liveCommands(Device $device, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return DeviceCommand::where('device_sn', $device->no_sn)
+            ->whereIn('id', $ids)
+            ->get()
+            ->mapWithKeys(function (DeviceCommand $command) {
+                [$label, $badgeClass] = self::statusLabel($command->status);
+
+                return [$command->id => [
+                    'status' => $command->status,
+                    'label' => $label,
+                    'badge_class' => $badgeClass,
+                    'return_code' => $command->return_code,
+                    'response' => $command->response,
+                    'sent_at' => $command->sent_at?->format('Y-m-d H:i:s'),
+                    'done_at' => $command->done_at?->format('Y-m-d H:i:s'),
+                ]];
+            })
+            ->all();
+    }
+
+    /**
      * The instructions themselves, newest first, each decoded into what it will
      * actually do to the machine.
      *

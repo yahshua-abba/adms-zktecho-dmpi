@@ -11,6 +11,7 @@ class DeviceCommand extends Model
         'body',
         'status',
         'return_code',
+        'response',
         'sent_at',
         'done_at',
     ];

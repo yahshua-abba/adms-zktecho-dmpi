@@ -51,11 +51,15 @@ class DeviceCommandDispatchTest extends TestCase
     {
         $cmd = DeviceCommand::create(['device_sn' => 'DEV1', 'body' => 'X', 'status' => 'sent']);
 
-        $this->call('POST', '/iclock/devicecmd?SN=DEV1', [], [], [], ['CONTENT_TYPE' => 'text/plain'], "ID={$cmd->id}&Return=0&CMD=DATA")
+        $reply = "ID={$cmd->id}&Return=0&CMD=DATA";
+
+        $this->call('POST', '/iclock/devicecmd?SN=DEV1', [], [], [], ['CONTENT_TYPE' => 'text/plain'], $reply)
             ->assertOk();
 
         $this->assertSame('done', $cmd->fresh()->status);
         $this->assertSame(0, $cmd->fresh()->return_code);
+        $this->assertSame($reply, $cmd->fresh()->response);
+        $this->assertNotNull($cmd->fresh()->done_at);
     }
 
     public function test_devicecmd_marks_command_failed_on_nonzero_return(): void
@@ -66,5 +70,18 @@ class DeviceCommandDispatchTest extends TestCase
             ->assertOk();
 
         $this->assertSame('failed', $cmd->fresh()->status);
+        $this->assertSame(-1002, $cmd->fresh()->return_code);
+        $this->assertSame("ID={$cmd->id}&Return=-1002&CMD=DATA", $cmd->fresh()->response);
+    }
+
+    public function test_a_device_cannot_report_a_result_for_another_devices_command(): void
+    {
+        $cmd = DeviceCommand::create(['device_sn' => 'DEV2', 'body' => 'X', 'status' => 'sent']);
+
+        $this->call('POST', '/iclock/devicecmd?SN=DEV1', [], [], [], ['CONTENT_TYPE' => 'text/plain'], "ID={$cmd->id}&Return=0&CMD=DATA")
+            ->assertOk();
+
+        $this->assertSame('sent', $cmd->fresh()->status);
+        $this->assertNull($cmd->fresh()->response);
     }
 }

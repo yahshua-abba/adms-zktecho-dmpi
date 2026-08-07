@@ -188,11 +188,14 @@ public function handshake(Request $request)
                 continue;
             }
             $return = $parts['Return'] ?? null;
-            DeviceCommand::where('id', $parts['ID'])->update([
-                'status' => ((int) $return === 0) ? 'done' : 'failed',
-                'return_code' => is_null($return) ? null : (int) $return,
-                'done_at' => now(),
-            ]);
+            DeviceCommand::where('id', $parts['ID'])
+                ->where('device_sn', $request->input('SN'))
+                ->update([
+                    'status' => ((int) $return === 0) ? 'done' : 'failed',
+                    'return_code' => is_null($return) ? null : (int) $return,
+                    'response' => trim($line),
+                    'done_at' => now(),
+                ]);
         }
 
         return "OK";
