@@ -18,7 +18,8 @@
             <div class="d-flex flex-wrap gap-2">
                 @foreach ($readers as $reader)
                     <a href="{{ route('devices.people', $reader->id) }}" class="btn btn-outline-secondary">
-                        <i class="bi bi-hdd-network"></i> Open physical clock {{ $reader->nama ?: $reader->no_sn }}
+                        <i class="bi bi-hdd-network"></i> Open physical clock
+                        {{ $reader->nama ? $reader->nama.' · '.$reader->no_sn : $reader->no_sn }}
                     </a>
                 @endforeach
             </div>
@@ -38,7 +39,7 @@
             @elseif ($readers->count() === 1)
                 To inspect delivery and punch evidence, use
                 <a href="{{ route('devices.people', $readers->first()->id) }}" class="fw-semibold">
-                    Open physical clock {{ $readers->first()->nama ?: $readers->first()->no_sn }}
+                    Open physical clock {{ $readers->first()->nama ? $readers->first()->nama.' · '.$readers->first()->no_sn : $readers->first()->no_sn }}
                 </a>.
             @else
                 {{ $readers->count() }} clocks are linked to it, and each has its own list of who has
@@ -46,6 +47,13 @@
             @endif
         </div>
     </div>
+
+    @if (session('success'))
+        <div class="alert alert-success"><i class="bi bi-check-circle"></i> {{ session('success') }}</div>
+    @endif
+    @if (session('error'))
+        <div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> {{ session('error') }}</div>
+    @endif
 
     <div class="row g-3 mb-4">
         <div class="col-12 col-lg-4">
@@ -128,6 +136,7 @@
                         <th>RFID Card</th>
                         <th>Payroll ID</th>
                         <th>Status</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -145,11 +154,74 @@
                             <td>{{ $p['chapa'] ?: '—' }}</td>
                             <td>@if ($p['rfid'])<code>{{ $p['rfid'] }}</code>@else<span class="text-muted">—</span>@endif</td>
                             <td>{{ $p['payroll_employee_id'] }}</td>
-                            <td><span class="badge {{ $statusClass }}">{{ $statusLabel }}</span></td>
+                            <td>
+                                <span class="badge {{ $statusClass }}">{{ $statusLabel }}</span>
+                                @if ($p['status'] === \App\Queries\TimekeeperDirectory::BLOCKED)
+                                    <details class="small mt-2" style="min-width: 15rem;">
+                                        <summary class="fw-semibold text-primary">How to make this eligible</summary>
+                                        @if ($p['resolution'] === \App\Queries\TimekeeperDirectory::RESOLVE_PIN_CONFLICT)
+                                            <ol class="ps-3 mt-2 mb-1">
+                                                <li>Open <a href="{{ route('employees.index', ['tab' => 'conflicts']) }}#tab-conflicts">PIN conflicts</a>.</li>
+                                                <li>Choose the correct employee who owns <code>{{ $p['pin'] }}</code>.</li>
+                                                <li>Return here and sync this person.</li>
+                                            </ol>
+                                            <a href="{{ route('employees.index', ['tab' => 'conflicts']) }}#tab-conflicts" class="btn btn-sm btn-outline-danger mt-1">
+                                                Resolve PIN conflict
+                                            </a>
+                                        @else
+                                            <ol class="ps-3 mt-2 mb-1">
+                                                <li>Open Employees and click <strong>Download employees</strong>.</li>
+                                                <li>If they remain blocked, check that payroll employee #{{ $p['payroll_employee_id'] }} is active and has company and CHAPA data.</li>
+                                                <li>Download employees again, then return here.</li>
+                                            </ol>
+                                            <a href="{{ route('employees.index') }}" class="btn btn-sm btn-outline-primary mt-1">
+                                                Download employees
+                                            </a>
+                                        @endif
+                                    </details>
+                                @elseif (! $p['rfid'])
+                                    <div class="small text-warning-emphasis mt-1">
+                                        No RFID in payroll. PIN/name can be synced, but card taps will not work yet.
+                                    </div>
+                                @endif
+                            </td>
+                            <td>
+                                @if ($p['status'] === \App\Queries\TimekeeperDirectory::ENROLLABLE && $readers->isNotEmpty())
+                                    <div class="d-flex flex-column align-items-start gap-1">
+                                        @foreach ($readers as $reader)
+                                            <form method="POST" action="{{ route('devices.timekeepers.people.sync', [
+                                                'code' => $device->code,
+                                                'payrollEmployeeId' => $p['payroll_employee_id'],
+                                                'device' => $reader->id,
+                                            ]) }}">
+                                                @csrf
+                                                <button class="btn btn-sm btn-primary">
+                                                    <i class="bi bi-person-up"></i>
+                                                    {{ $readers->count() === 1
+                                                        ? 'Sync this person'
+                                                        : 'Sync to '.($reader->nama ? $reader->nama.' · '.$reader->no_sn : $reader->no_sn) }}
+                                                </button>
+                                            </form>
+                                        @endforeach
+                                        @if ($readers->count() === 1)
+                                            <span class="small text-muted">
+                                                to {{ $readers->first()->nama ? $readers->first()->nama.' · '.$readers->first()->no_sn : $readers->first()->no_sn }}
+                                            </span>
+                                        @endif
+                                        <span class="small text-muted">Queues PIN, name and RFID. Fingerprints are not included.</span>
+                                    </div>
+                                @elseif ($p['status'] === \App\Queries\TimekeeperDirectory::ENROLLABLE)
+                                    <a href="{{ route('devices.index') }}" class="btn btn-sm btn-outline-primary">
+                                        Link a physical clock first
+                                    </a>
+                                @else
+                                    <span class="text-muted">Fix eligibility first</span>
+                                @endif
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="text-muted text-center py-3">
+                            <td colspan="8" class="text-muted text-center py-3">
                                 @if ($search || $status)
                                     Nobody assigned to this device matches those filters.
                                 @else

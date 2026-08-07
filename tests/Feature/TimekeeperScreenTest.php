@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Device;
 use App\Models\DeviceAssignment;
+use App\Models\DeviceCommand;
 use App\Models\EmployeeMap;
 use App\Models\PayrollDevice;
+use App\Models\PinCollision;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -49,7 +51,97 @@ class TimekeeperScreenTest extends TestCase
             ->assertSee('Rubelyn')
             ->assertSee('5_4968')
             ->assertSee('Eligible for enrollment')
-            ->assertSee('Open physical clock Gowning-1');
+            ->assertSee('Open physical clock Gowning-1')
+            ->assertSee('Sync this person');
+    }
+
+    public function test_an_eligible_person_can_be_synced_to_one_linked_clock(): void
+    {
+        $this->seedEstate();
+        $device = Device::where('no_sn', 'DEV1')->firstOrFail();
+
+        $response = $this->post(route('devices.timekeepers.people.sync', [
+            'code' => 'GOWNING 1',
+            'payrollEmployeeId' => 48213,
+            'device' => $device,
+        ]));
+
+        $response->assertRedirect();
+        $response->assertSessionHas('success');
+        $this->assertDatabaseHas('device_commands', [
+            'device_sn' => 'DEV1',
+            'status' => 'pending',
+        ]);
+        $this->assertStringContainsString('PIN=5_4968', DeviceCommand::firstOrFail()->body);
+    }
+
+    public function test_clocks_with_the_same_name_are_distinguished_by_serial(): void
+    {
+        $this->seedEstate();
+        Device::create(['no_sn' => 'DEV3', 'nama' => 'Gowning-1', 'payroll_device_code' => 'GOWNING 1']);
+
+        $this->get(route('devices.timekeepers.show', ['code' => 'GOWNING 1']))
+            ->assertOk()
+            ->assertSee('Gowning-1 · DEV1')
+            ->assertSee('Gowning-1 · DEV3');
+    }
+
+    public function test_individual_sync_rejects_a_clock_linked_to_another_payroll_device(): void
+    {
+        $this->seedEstate();
+        $other = Device::create(['no_sn' => 'OTHER', 'payroll_device_code' => 'TEST2']);
+
+        $response = $this->post(route('devices.timekeepers.people.sync', [
+            'code' => 'GOWNING 1',
+            'payrollEmployeeId' => 48213,
+            'device' => $other,
+        ]));
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+        $this->assertSame(0, DeviceCommand::count());
+    }
+
+    public function test_blocked_people_get_a_guide_for_their_specific_problem(): void
+    {
+        $this->seedEstate();
+        DeviceAssignment::create(['device_code' => 'GOWNING 1', 'payroll_employee_id' => 99999]);
+        DeviceAssignment::create(['device_code' => 'GOWNING 1', 'payroll_employee_id' => 271]);
+        PinCollision::create([
+            'device_pin' => '271_14257',
+            'claimants' => [
+                ['payroll_employee_id' => 271, 'name' => 'One'],
+                ['payroll_employee_id' => 272, 'name' => 'Two'],
+            ],
+        ]);
+
+        $this->get(route('devices.timekeepers.show', ['code' => 'GOWNING 1']))
+            ->assertOk()
+            ->assertSee('How to make this eligible')
+            ->assertSee('Download employees')
+            ->assertSee('Resolve PIN conflict');
+    }
+
+    public function test_an_eligible_person_without_a_reader_is_told_to_link_one_first(): void
+    {
+        $this->seedEstate();
+        DeviceAssignment::create(['device_code' => 'TEST2', 'payroll_employee_id' => 48213]);
+
+        $this->get(route('devices.timekeepers.show', ['code' => 'TEST2']))
+            ->assertOk()
+            ->assertSee('Link a physical clock first');
+    }
+
+    public function test_individual_sync_requires_login(): void
+    {
+        $this->seedEstate();
+        $device = Device::where('no_sn', 'DEV1')->firstOrFail();
+
+        $this->guest()->post(route('devices.timekeepers.people.sync', [
+            'code' => 'GOWNING 1',
+            'payrollEmployeeId' => 48213,
+            'device' => $device,
+        ]))->assertRedirect(route('login'));
     }
 
     /**

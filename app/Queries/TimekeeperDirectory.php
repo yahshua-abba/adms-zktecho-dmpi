@@ -45,6 +45,12 @@ class TimekeeperDirectory
     /** Assigned in payroll but with no employee_map row — cannot be enrolled at all. */
     public const BLOCKED = 'blocked';
 
+    /** The employee roster needs to be refreshed or fixed in payroll. */
+    public const DOWNLOAD_EMPLOYEES = 'download_employees';
+
+    /** Two payroll employees claim the same PIN and an owner must be chosen. */
+    public const RESOLVE_PIN_CONFLICT = 'resolve_pin_conflict';
+
     /** Filter values for the device list. */
     public const FILTERS = [
         'linked' => 'Linked to a clock here',
@@ -209,6 +215,7 @@ class TimekeeperDirectory
                         'rfid' => $employee->rfid,
                         'card' => RfidConverter::toCard($employee->rfid),
                         'reason' => null,
+                        'resolution' => null,
                     ];
                 }
 
@@ -224,6 +231,9 @@ class TimekeeperDirectory
                     'reason' => isset($contested[(int) $payrollId])
                         ? 'Two payroll employees claim this device PIN, so it is deliberately unmapped. Decide the owner under Employees > PIN conflicts.'
                         : 'No employee record for this payroll ID on this server. Download employees from DMPI, or check that they are still active in payroll.',
+                    'resolution' => isset($contested[(int) $payrollId])
+                        ? self::RESOLVE_PIN_CONFLICT
+                        : self::DOWNLOAD_EMPLOYEES,
                 ];
             })
             // Blocked first: they are the only rows with something to do about them.

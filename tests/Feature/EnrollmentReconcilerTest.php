@@ -81,6 +81,49 @@ class EnrollmentReconcilerTest extends TestCase
         $this->assertSame(1, DeviceCommand::where('device_sn', 'DEV1')->count());
     }
 
+    public function test_individual_reconcile_queues_only_the_chosen_employee(): void
+    {
+        $this->setupDevice();
+        EmployeeMap::create([
+            'device_pin' => '5_5000', 'company' => '5', 'chapa' => '5000',
+            'payroll_employee_id' => 50000, 'name' => 'Another Person', 'rfid' => '40:33:A7:BD',
+        ]);
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 50000]);
+
+        $result = (new EnrollmentReconciler)->reconcilePerson('DEV1', 48213);
+
+        $this->assertSame(EnrollmentReconciler::PERSON_QUEUED, $result);
+        $this->assertSame(1, DeviceCommand::count());
+        $this->assertStringContainsString('PIN=5_4968', DeviceCommand::first()->body);
+        $this->assertDatabaseHas('device_enrollment', ['device_sn' => 'DEV1', 'pin' => '5_4968']);
+        $this->assertDatabaseMissing('device_enrollment', ['device_sn' => 'DEV1', 'pin' => '5_5000']);
+    }
+
+    public function test_individual_reconcile_does_not_duplicate_a_waiting_command(): void
+    {
+        $this->setupDevice();
+        $reconciler = new EnrollmentReconciler;
+
+        $this->assertSame(EnrollmentReconciler::PERSON_QUEUED, $reconciler->reconcilePerson('DEV1', 48213));
+        $this->assertSame(EnrollmentReconciler::PERSON_ALREADY_WAITING, $reconciler->reconcilePerson('DEV1', 48213));
+        $this->assertSame(1, DeviceCommand::count());
+    }
+
+    public function test_individual_reconcile_refuses_an_unassigned_or_unmapped_employee(): void
+    {
+        $this->setupDevice();
+        EmployeeMap::create([
+            'device_pin' => '5_5000', 'company' => '5', 'chapa' => '5000',
+            'payroll_employee_id' => 50000, 'name' => 'Not Assigned',
+        ]);
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 99999]);
+        $reconciler = new EnrollmentReconciler;
+
+        $this->assertSame(EnrollmentReconciler::PERSON_NOT_ASSIGNED, $reconciler->reconcilePerson('DEV1', 50000));
+        $this->assertSame(EnrollmentReconciler::PERSON_NOT_ELIGIBLE, $reconciler->reconcilePerson('DEV1', 99999));
+        $this->assertSame(0, DeviceCommand::count());
+    }
+
     public function test_queues_update_when_card_changes(): void
     {
         $this->setupDevice();

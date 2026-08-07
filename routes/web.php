@@ -65,6 +65,9 @@ Route::middleware('auth.admin')->group(function () {
     Route::get('devices/timekeepers/{code}', [TimekeeperController::class, 'show'])
         ->where('code', '[^/]+')
         ->name('devices.timekeepers.show');
+    Route::post('devices/timekeepers/{code}/people/{payrollEmployeeId}/sync/{device}', [TimekeeperController::class, 'syncPerson'])
+        ->where(['code' => '[^/]+', 'payrollEmployeeId' => '[0-9]+'])
+        ->name('devices.timekeepers.people.sync');
     Route::get('devices-status', [DeviceController::class, 'status'])->name('devices.status');
     Route::patch('devices/{device}', [DeviceController::class, 'update'])->name('devices.update');
     // Removing a clock keeps its punches — see DeviceController::destroy.

@@ -8,6 +8,7 @@ use App\Models\DeviceCommand;
 use App\Models\DeviceEnrollment;
 use App\Models\EmployeeMap;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Keeps each device's user list in step with its DMPI assignments by queuing
@@ -29,6 +30,14 @@ use Illuminate\Support\Collection;
  */
 class EnrollmentReconciler
 {
+    public const PERSON_QUEUED = 'queued';
+
+    public const PERSON_ALREADY_WAITING = 'already_waiting';
+
+    public const PERSON_NOT_ASSIGNED = 'not_assigned';
+
+    public const PERSON_NOT_ELIGIBLE = 'not_eligible';
+
     /** Rows per bulk write. */
     private const CHUNK = 500;
 
@@ -108,6 +117,61 @@ class EnrollmentReconciler
         }
 
         return count($commands);
+    }
+
+    /**
+     * Queue one assigned employee for one physical clock.
+     *
+     * The clock row is locked while the duplicate check and writes happen, so
+     * two quick clicks cannot put identical pending commands in its mailbox.
+     * Assignment and employee mapping are checked again here rather than trusted
+     * from the page: both can change during a payroll download after the page was
+     * rendered.
+     */
+    public function reconcilePerson(string $deviceSn, int $payrollEmployeeId): string
+    {
+        return DB::transaction(function () use ($deviceSn, $payrollEmployeeId) {
+            $device = Device::where('no_sn', $deviceSn)->lockForUpdate()->first();
+
+            if ($device === null || $device->payroll_device_code === null) {
+                return self::PERSON_NOT_ASSIGNED;
+            }
+
+            $assigned = DeviceAssignment::where('device_code', $device->payroll_device_code)
+                ->where('payroll_employee_id', $payrollEmployeeId)
+                ->exists();
+
+            if (! $assigned) {
+                return self::PERSON_NOT_ASSIGNED;
+            }
+
+            $employee = EmployeeMap::where('payroll_employee_id', $payrollEmployeeId)->first();
+            if ($employee === null) {
+                return self::PERSON_NOT_ELIGIBLE;
+            }
+
+            $user = [
+                'pin' => $employee->device_pin,
+                'name' => $employee->name,
+                'card' => RfidConverter::toCard($employee->rfid),
+            ];
+            $body = $this->updateCommand($user);
+
+            if (DeviceCommand::where('device_sn', $deviceSn)
+                ->where('status', 'pending')
+                ->where('body', $body)
+                ->exists()) {
+                return self::PERSON_ALREADY_WAITING;
+            }
+
+            DeviceEnrollment::updateOrCreate(
+                ['device_sn' => $deviceSn, 'pin' => $user['pin']],
+                ['name' => $user['name'], 'card' => $user['card']],
+            );
+            DeviceCommand::create($this->commandRow($deviceSn, $body, now()));
+
+            return self::PERSON_QUEUED;
+        });
     }
 
     /** @return Collection<string, array{pin:string,name:?string,card:?string}> */
