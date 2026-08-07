@@ -277,7 +277,7 @@ class DeviceRosterTest extends TestCase
         $response = $this->get('/devices');
 
         $response->assertOk();
-        $response->assertSee('on the clock');
+        $response->assertSee('recorded for clock');
         $response->assertSee('payroll assigns 2');
         $response->assertSee("1 can't be added", false);
     }
@@ -294,11 +294,11 @@ class DeviceRosterTest extends TestCase
         $response = $this->get("/devices/{$device->id}/people");
 
         $response->assertOk();
-        $response->assertSee('People on Main Gate');
+        $response->assertSee('People recorded for Main Gate');
         $response->assertSee('ALPHA, Ann');
         $response->assertSee('BRAVO, Ben');
         $response->assertSee('1996052557');       // RFID
-        $response->assertSee('On the clock');
+        $response->assertSee('Recorded for clock');
         $response->assertSee('Waiting to be added');
     }
 

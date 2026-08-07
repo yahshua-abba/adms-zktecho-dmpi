@@ -218,17 +218,16 @@
                                     @endforeach
                                 </select>
                             </td>
-                            {{-- Two numbers, never one. "On the clock" is what this server
-                                 has sent to the machine; "payroll assigns" is what DMPI says
-                                 belongs there. They disagree whenever an enrollment sync is
-                                 owed or a person can't be enrolled, and that disagreement is
-                                 what an operator needs to see. Full breakdown one click away.
-                                 See App\Queries\DeviceRoster. --}}
+                            {{-- Two numbers, never one. "Recorded for clock" is ADMS's
+                                 intended user list; "payroll assigns" is what DMPI says
+                                 belongs there. The first is deliberately not called "on the
+                                 clock": an unconfirmed command is not proof that the physical
+                                 reader applied it. See App\Queries\DeviceRoster. --}}
                             @php ($people = $peopleCounts[$d->no_sn] ?? ['on_clock' => 0, 'assigned' => 0, 'blocked' => 0, 'waiting' => 0, 'unconfirmed' => 0, 'linked' => false])
                             <td>
-                                <a href="{{ route('devices.people', $d->id) }}" class="text-decoration-none" title="See who is on this clock">
+                                <a href="{{ route('devices.people', $d->id) }}" class="text-decoration-none" title="See ADMS's intended user list for this clock; unconfirmed commands may not have been applied">
                                     <span class="fs-6 fw-semibold">{{ $people['on_clock'] }}</span>
-                                    <span class="small">on the clock</span>
+                                    <span class="small">recorded for clock</span>
                                 </a>
                                 <div class="small text-muted">
                                     @if ($people['linked'])
@@ -268,7 +267,7 @@
                                 <a href="{{ route('devices.PunchLog', $d->id) }}" class="btn btn-sm btn-outline-secondary">Logs</a>
                                 <form action="{{ route('devices.syncEnrollments', $d->id) }}" method="POST" class="d-inline">
                                     @csrf
-                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Queue enrollment commands for this device">Sync enrollments</button>
+                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Re-send all currently assigned users and queue any needed removals">Sync enrollments</button>
                                 </form>
                                 {{-- The serial is reported by the device itself over an endpoint that
                                      is deliberately open, so it is attacker-controlled. It must never

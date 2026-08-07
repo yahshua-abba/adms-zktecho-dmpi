@@ -98,6 +98,31 @@ class DeviceManagementTest extends TestCase
         $this->assertSame(1, DeviceCommand::where('device_sn', 'DEV-1')->count());
     }
 
+    public function test_sync_enrollments_button_resends_an_assigned_user_after_an_unconfirmed_delivery(): void
+    {
+        $device = Device::create(['no_sn' => 'DEV1', 'direction' => 'in', 'payroll_device_code' => 'C1']);
+        EmployeeMap::create([
+            'device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968',
+            'payroll_employee_id' => 48213, 'name' => 'Rubelyn', 'rfid' => '55:2D:E3:D3',
+        ]);
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 48213]);
+        DeviceEnrollment::create([
+            'device_sn' => 'DEV1', 'pin' => '5_4968', 'name' => 'Rubelyn', 'card' => '[552DE3D3]',
+        ]);
+        DeviceCommand::create([
+            'device_sn' => 'DEV1',
+            'body' => "DATA UPDATE USERINFO PIN=5_4968\tName=Rubelyn\tPri=0\tCard=[552DE3D3]",
+            'status' => 'sent',
+            'sent_at' => now(),
+        ]);
+
+        $response = $this->post("/devices/{$device->id}/sync-enrollments");
+
+        $response->assertRedirect()->assertSessionHas('success', 'Queued 1 enrollment command(s) for DEV1.');
+        $this->assertSame(1, DeviceCommand::where('status', 'sent')->count());
+        $this->assertSame(1, DeviceCommand::where('status', 'pending')->count());
+    }
+
     /**
      * DMPI's device list used to render ONLY as a dropdown inside each physical
      * device row. On a server where no clock had checked in, a freshly downloaded

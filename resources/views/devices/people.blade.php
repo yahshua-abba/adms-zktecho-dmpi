@@ -6,7 +6,7 @@
             <a href="{{ route('devices.index') }}" class="small text-decoration-none">
                 <i class="bi bi-arrow-left"></i> Back to devices
             </a>
-            <h2 class="mb-1 mt-1">People on {{ $device->nama ?: $device->no_sn }}</h2>
+            <h2 class="mb-1 mt-1">People recorded for {{ $device->nama ?: $device->no_sn }}</h2>
             <div class="text-muted small">
                 <span class="badge {{ $device->isOnline() ? 'bg-success' : 'bg-secondary' }}">● {{ $device->isOnline() ? 'Online' : 'Offline' }}</span>
                 <span class="ms-2"><i class="bi bi-hdd-network"></i> {{ $device->no_sn }}</span>
@@ -26,7 +26,7 @@
             </a>
             <form action="{{ route('devices.syncEnrollments', $device->id) }}" method="POST">
                 @csrf
-                <button type="submit" class="btn btn-outline-success" title="Queue the add/remove commands needed to make this clock match payroll">
+                <button type="submit" class="btn btn-outline-success" title="Re-send all currently assigned users and queue any needed removals">
                     <i class="bi bi-arrow-repeat"></i> Sync enrollments
                 </button>
             </form>
@@ -47,9 +47,9 @@
     <div class="row g-3 mb-4">
         <div class="col-6 col-lg-3">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">On the clock</div>
+                <div class="text-muted small">Recorded for clock</div>
                 <div class="fs-3 fw-semibold">{{ $summary['on_clock'] }}</div>
-                <div class="small text-muted">sent to this device</div>
+                <div class="small text-muted">ADMS intended list</div>
             </div></div>
         </div>
         <div class="col-6 col-lg-3">
@@ -75,13 +75,13 @@
         </div>
     </div>
 
-    {{-- The honest caveat. device_enrollment records what this server SENT, and a
-         clock that has been offline still has those changes sitting in its queue —
-         so "on the clock" must never be read as "confirmed on the machine". --}}
+    {{-- The honest caveat. device_enrollment records ADMS's intended state, not a
+         physical inventory read back from the clock. --}}
     <div class="alert alert-light border d-flex gap-2">
         <i class="bi bi-info-circle fs-5 text-muted"></i>
         <div class="small mb-0">
-            <strong>On the clock</strong> means this server has sent the person to the device.
+            <strong>Recorded for clock</strong> means ADMS queued or sent the person to the device;
+            it does not prove the clock applied the command.
             {{-- "Unconfirmed", not "queued": the count covers changes still in the
                  mailbox AND ones already handed over that the clock never reported
                  back on. Only the first are waiting for a connection, so promising
@@ -112,7 +112,7 @@
                 <label class="form-label small mb-1">Status</label>
                 <select name="status" class="form-select" onchange="this.form.submit()">
                     <option value="">All</option>
-                    <option value="{{ \App\Queries\DeviceRoster::ON_CLOCK }}" @selected($status === \App\Queries\DeviceRoster::ON_CLOCK)>On the clock</option>
+                    <option value="{{ \App\Queries\DeviceRoster::ON_CLOCK }}" @selected($status === \App\Queries\DeviceRoster::ON_CLOCK)>Recorded for clock</option>
                     <option value="{{ \App\Queries\DeviceRoster::ADDING }}" @selected($status === \App\Queries\DeviceRoster::ADDING)>Waiting to be added</option>
                     <option value="{{ \App\Queries\DeviceRoster::REMOVING }}" @selected($status === \App\Queries\DeviceRoster::REMOVING)>Waiting to be removed</option>
                     <option value="{{ \App\Queries\DeviceRoster::BLOCKED }}" @selected($status === \App\Queries\DeviceRoster::BLOCKED)>Can't be added</option>
@@ -186,9 +186,9 @@
                                 @if ($search || $status)
                                     Nobody on this clock matches those filters.
                                 @elseif ($device->payroll_device_code)
-                                    Nobody is on this clock yet. Use <strong>Download assignments</strong> on the Devices page to pull payroll's list, then <strong>Sync enrollments</strong>.
+                                    Nobody is recorded for this clock yet. Use <strong>Download assignments</strong> on the Devices page to pull payroll's list, then <strong>Sync enrollments</strong>.
                                 @else
-                                    Nobody is on this clock, and it isn't linked to a payroll device yet.
+                                    Nobody is recorded for this clock, and it isn't linked to a payroll device yet.
                                 @endif
                             </td>
                         </tr>

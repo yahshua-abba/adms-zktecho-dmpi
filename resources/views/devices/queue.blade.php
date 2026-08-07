@@ -51,7 +51,7 @@
         </div>
         <div class="col-6 col-lg-3">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Handed to the device</div>
+                <div class="text-muted small">Handed over — unconfirmed</div>
                 <div class="fs-3 fw-semibold">{{ number_format($counts[$Q::SENT]) }}</div>
                 <div class="small text-muted">too late to stop</div>
             </div></div>

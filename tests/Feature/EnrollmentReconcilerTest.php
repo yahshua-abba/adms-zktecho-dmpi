@@ -53,6 +53,34 @@ class EnrollmentReconcilerTest extends TestCase
         $this->assertSame(1, DeviceCommand::where('device_sn', 'DEV1')->count());
     }
 
+    public function test_forced_reconcile_requeues_assigned_users_after_an_unconfirmed_delivery(): void
+    {
+        $this->setupDevice();
+        $reconciler = new EnrollmentReconciler;
+
+        $reconciler->reconcileDevice('DEV1');
+        DeviceCommand::query()->update(['status' => 'sent', 'sent_at' => now()]);
+
+        $queued = $reconciler->reconcileDevice('DEV1', forceUpdates: true);
+
+        $this->assertSame(1, $queued);
+        $this->assertSame(1, DeviceCommand::where('device_sn', 'DEV1')->where('status', 'sent')->count());
+        $this->assertSame(1, DeviceCommand::where('device_sn', 'DEV1')->where('status', 'pending')->count());
+    }
+
+    public function test_forced_reconcile_does_not_duplicate_an_update_that_is_still_waiting(): void
+    {
+        $this->setupDevice();
+        $reconciler = new EnrollmentReconciler;
+
+        $reconciler->reconcileDevice('DEV1');
+
+        $queued = $reconciler->reconcileDevice('DEV1', forceUpdates: true);
+
+        $this->assertSame(0, $queued);
+        $this->assertSame(1, DeviceCommand::where('device_sn', 'DEV1')->count());
+    }
+
     public function test_queues_update_when_card_changes(): void
     {
         $this->setupDevice();

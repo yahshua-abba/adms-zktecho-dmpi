@@ -124,7 +124,7 @@ class DeviceQueue
     {
         return match ($status) {
             self::PENDING => ['Waiting to be collected', 'bg-warning text-dark'],
-            self::SENT => ['Handed to the device', 'bg-info text-dark'],
+            self::SENT => ['Handed over — unconfirmed', 'bg-info text-dark'],
             self::DONE => ['Done', 'bg-success'],
             self::FAILED => ['Failed', 'bg-danger'],
             default => [$status, 'bg-secondary'],
