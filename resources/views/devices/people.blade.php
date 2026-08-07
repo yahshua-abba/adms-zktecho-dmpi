@@ -6,7 +6,7 @@
             <a href="{{ route('devices.index') }}" class="small text-decoration-none">
                 <i class="bi bi-arrow-left"></i> Back to devices
             </a>
-            <h2 class="mb-1 mt-1">People recorded for {{ $device->nama ?: $device->no_sn }}</h2>
+            <h2 class="mb-1 mt-1">Enrollment status for {{ $device->nama ?: $device->no_sn }}</h2>
             <div class="text-muted small">
                 <span class="badge {{ $device->isOnline() ? 'bg-success' : 'bg-secondary' }}">● {{ $device->isOnline() ? 'Online' : 'Offline' }}</span>
                 <span class="ms-2"><i class="bi bi-hdd-network"></i> {{ $device->no_sn }}</span>
@@ -23,6 +23,9 @@
         <div class="d-flex flex-wrap gap-2">
             <a href="{{ route('devices.Attendance', ['device' => $device->no_sn]) }}" class="btn btn-outline-secondary">
                 <i class="bi bi-list-ul"></i> Punches
+            </a>
+            <a href="{{ route('devices.queue', $device->id) }}" class="btn btn-outline-warning">
+                <i class="bi bi-inbox"></i> Queue
             </a>
             <form action="{{ route('devices.syncEnrollments', $device->id) }}" method="POST">
                 @csrf
@@ -44,61 +47,62 @@
          Counts over the whole device, not the filtered page: these are the
          numbers someone came here to read, and a search box shouldn't quietly
          change what "5 can't be added" means. --}}
-    <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3">
+    <div class="row row-cols-2 row-cols-lg-5 g-3 mb-4">
+        <div class="col">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Recorded for clock</div>
+                <div class="text-muted small">ADMS intended list</div>
                 <div class="fs-3 fw-semibold">{{ $summary['on_clock'] }}</div>
-                <div class="small text-muted">ADMS intended list</div>
+                <div class="small text-muted">server plan, not device inventory</div>
             </div></div>
         </div>
-        <div class="col-6 col-lg-3">
+        <div class="col">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Waiting to be added</div>
-                <div class="fs-3 fw-semibold {{ $summary['adding'] ? 'text-info' : '' }}">{{ $summary['adding'] }}</div>
-                <div class="small text-muted">assigned, not sent yet</div>
+                <div class="text-muted small">Punches received</div>
+                <div class="fs-3 fw-semibold {{ $summary['working'] ? 'text-success' : '' }}">{{ $summary['working'] }}</div>
+                <div class="small text-muted">strongest proof a PIN works here</div>
             </div></div>
         </div>
-        <div class="col-6 col-lg-3">
+        <div class="col">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Waiting to be removed</div>
-                <div class="fs-3 fw-semibold {{ $summary['removing'] ? 'text-warning' : '' }}">{{ $summary['removing'] }}</div>
-                <div class="small text-muted">no longer assigned</div>
+                <div class="text-muted small">Waiting for clock</div>
+                <div class="fs-3 fw-semibold {{ $summary['waiting'] ? 'text-info' : '' }}">{{ $summary['waiting'] }}</div>
+                <div class="small text-muted">latest change still on ADMS</div>
             </div></div>
         </div>
-        <div class="col-6 col-lg-3">
+        <div class="col">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Can't be added</div>
+                <div class="text-muted small">Sent — unconfirmed</div>
+                <div class="fs-3 fw-semibold {{ $summary['unconfirmed'] ? 'text-warning' : '' }}">{{ $summary['unconfirmed'] }}</div>
+                <div class="small text-muted">clock gave no result</div>
+            </div></div>
+        </div>
+        <div class="col">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted small">Can't be enrolled</div>
                 <div class="fs-3 fw-semibold {{ $summary['blocked'] ? 'text-danger' : '' }}">{{ $summary['blocked'] }}</div>
-                <div class="small text-muted">no employee record here</div>
+                <div class="small text-muted">missing employee or PIN conflict</div>
             </div></div>
         </div>
     </div>
 
-    {{-- The honest caveat. device_enrollment records ADMS's intended state, not a
-         physical inventory read back from the clock. --}}
-    <div class="alert alert-light border d-flex gap-2">
+    <div class="alert alert-light border d-flex flex-wrap align-items-center gap-3">
         <i class="bi bi-info-circle fs-5 text-muted"></i>
-        <div class="small mb-0">
-            <strong>Recorded for clock</strong> means ADMS queued or sent the person to the device;
-            it does not prove the clock applied the command.
-            {{-- "Unconfirmed", not "queued": the count covers changes still in the
-                 mailbox AND ones already handed over that the clock never reported
-                 back on. Only the first are waiting for a connection, so promising
-                 that all of them are lands an operator on the queue screen looking
-                 for something to cancel that isn't there. --}}
-            @if ($summary['queued'])
-                <a href="{{ route('devices.queue', $device->id) }}" class="text-decoration-none">
-                    <strong class="text-warning-emphasis">{{ $summary['queued'] }} person/people have a change the clock hasn't confirmed</strong></a> —
-                either still waiting to be collected, or already sent with no result reported back.
-                Open the queue to see which.
+        <div class="small mb-0 flex-grow-1">
+            <strong>ADMS intended list</strong> is the server's plan, not a live inventory read from the clock.
+            A punch received from this serial is the strongest evidence that a person's PIN works here.
+            @if ($summary['waiting'] || $summary['unconfirmed'])
+                <br><strong>{{ number_format($summary['waiting']) }} waiting for the clock</strong> and
+                <strong>{{ number_format($summary['unconfirmed']) }} sent but unconfirmed</strong>.
             @else
-                Nothing is queued for this device right now.
+                There are no active enrollment commands for this device.
             @endif
             @unless ($device->payroll_device_code)
                 <br>This clock isn't linked to a payroll device, so nobody is assigned to it and its user list isn't being managed. Link it on the Devices page to start syncing.
             @endunless
         </div>
+        <a href="{{ route('devices.queue', $device->id) }}" class="btn btn-sm btn-outline-warning">
+            <i class="bi bi-inbox"></i> Open queue
+        </a>
     </div>
 
     <div class="filter-bar">
@@ -112,10 +116,13 @@
                 <label class="form-label small mb-1">Status</label>
                 <select name="status" class="form-select" onchange="this.form.submit()">
                     <option value="">All</option>
-                    <option value="{{ \App\Queries\DeviceRoster::ON_CLOCK }}" @selected($status === \App\Queries\DeviceRoster::ON_CLOCK)>Recorded for clock</option>
-                    <option value="{{ \App\Queries\DeviceRoster::ADDING }}" @selected($status === \App\Queries\DeviceRoster::ADDING)>Waiting to be added</option>
-                    <option value="{{ \App\Queries\DeviceRoster::REMOVING }}" @selected($status === \App\Queries\DeviceRoster::REMOVING)>Waiting to be removed</option>
-                    <option value="{{ \App\Queries\DeviceRoster::BLOCKED }}" @selected($status === \App\Queries\DeviceRoster::BLOCKED)>Can't be added</option>
+                    <option value="{{ \App\Queries\DeviceRoster::WORKING }}" @selected($status === \App\Queries\DeviceRoster::WORKING)>Punch received here</option>
+                    <option value="{{ \App\Queries\DeviceRoster::WAITING }}" @selected($status === \App\Queries\DeviceRoster::WAITING)>Waiting for clock</option>
+                    <option value="{{ \App\Queries\DeviceRoster::UNCONFIRMED }}" @selected($status === \App\Queries\DeviceRoster::UNCONFIRMED)>Sent — unconfirmed</option>
+                    <option value="{{ \App\Queries\DeviceRoster::ON_CLOCK }}" @selected($status === \App\Queries\DeviceRoster::ON_CLOCK)>Recorded by ADMS</option>
+                    <option value="{{ \App\Queries\DeviceRoster::ADDING }}" @selected($status === \App\Queries\DeviceRoster::ADDING)>Not recorded by ADMS</option>
+                    <option value="{{ \App\Queries\DeviceRoster::REMOVING }}" @selected($status === \App\Queries\DeviceRoster::REMOVING)>No longer assigned</option>
+                    <option value="{{ \App\Queries\DeviceRoster::BLOCKED }}" @selected($status === \App\Queries\DeviceRoster::BLOCKED)>Can't be enrolled</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -161,13 +168,26 @@
                             <td>@if ($p['rfid'])<code>{{ $p['rfid'] }}</code>@else<span class="text-muted">—</span>@endif</td>
                             <td>{{ $p['payroll_employee_id'] ?: '—' }}</td>
                             <td>
-                                <span class="badge {{ $statusClass }}">{{ $statusLabel }}</span>
-                                @if ($p['queued'] === 'add')
-                                    <div class="small text-muted"><i class="bi bi-hourglass-split"></i> add queued, not delivered</div>
-                                @elseif ($p['queued'] === 'remove')
-                                    <div class="small text-muted"><i class="bi bi-hourglass-split"></i> removal queued, not delivered</div>
+                                @if ($p['punch_count'])
+                                    <span class="badge bg-success">Punch received here</span>
+                                @elseif ($p['status'] === \App\Queries\DeviceRoster::BLOCKED)
+                                    <span class="badge {{ $statusClass }}">{{ $statusLabel }}</span>
+                                @else
+                                    <span class="badge bg-secondary">No punch received here</span>
+                                @endif
+                                @unless ($p['status'] === \App\Queries\DeviceRoster::BLOCKED)
+                                    <div class="small text-muted">{{ $statusLabel }}</div>
+                                @endunless
+                                @if (($p['command']['delivery'] ?? null) === 'pending')
+                                    <div class="small text-info-emphasis"><i class="bi bi-hourglass-split"></i>
+                                        {{ $p['command']['action'] === 'add' ? 'add/update waiting for clock' : 'removal waiting for clock' }}
+                                    </div>
+                                @elseif (($p['command']['delivery'] ?? null) === 'sent')
+                                    <div class="small text-warning-emphasis"><i class="bi bi-send"></i>
+                                        {{ $p['command']['action'] === 'add' ? 'add/update sent — unconfirmed' : 'removal sent — unconfirmed' }}
+                                    </div>
                                 @elseif ($p['sent_at'])
-                                    <div class="small text-muted">sent {{ $p['sent_at']->diffForHumans() }}</div>
+                                    <div class="small text-muted">ADMS recorded {{ $p['sent_at']->diffForHumans() }}</div>
                                 @endif
                             </td>
                             <td>
@@ -186,9 +206,9 @@
                                 @if ($search || $status)
                                     Nobody on this clock matches those filters.
                                 @elseif ($device->payroll_device_code)
-                                    Nobody is recorded for this clock yet. Use <strong>Download assignments</strong> on the Devices page to pull payroll's list, then <strong>Sync enrollments</strong>.
+                                    ADMS has no intended roster for this clock yet. Use <strong>Download assignments</strong> on the Devices page to pull payroll's list, then <strong>Sync enrollments</strong>.
                                 @else
-                                    Nobody is recorded for this clock, and it isn't linked to a payroll device yet.
+                                    ADMS has no intended roster for this clock, and it isn't linked to a payroll device yet.
                                 @endif
                             </td>
                         </tr>

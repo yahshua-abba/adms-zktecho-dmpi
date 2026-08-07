@@ -269,8 +269,8 @@ class TimekeeperDirectory
     public static function label(string $status): array
     {
         return match ($status) {
-            self::ENROLLABLE => ['Can be added to a clock', 'bg-success'],
-            self::BLOCKED => ["Can't be added", 'bg-danger'],
+            self::ENROLLABLE => ['Eligible for enrollment', 'bg-success'],
+            self::BLOCKED => ["Can't be enrolled", 'bg-danger'],
             default => [$status, 'bg-secondary'],
         };
     }

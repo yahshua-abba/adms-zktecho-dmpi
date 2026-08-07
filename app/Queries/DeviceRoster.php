@@ -24,13 +24,14 @@ use Illuminate\Support\Collection;
  *
  *  - `device_assignments` is what DMPI says *should* be on the clock (resolved
  *    through the device's linked payroll device code).
- *  - `device_enrollment` is what this server has actually *sent* to the clock
- *    (EnrollmentReconciler writes it at the moment it queues the command).
+ *  - `device_enrollment` is ADMS's intended state for the clock. It is written
+ *    when a command is queued, before the clock collects or applies it.
  *
  * Neither is "the truth on the machine": a clock that has been offline for a
- * week still has its changes sitting in `device_commands`. So a person is
- * reported as sent/not-sent/queued, never as confirmed-present, and the
- * queued flag is read from the command queue itself rather than implied.
+ * week still has its changes sitting in `device_commands`. Punches are the
+ * strongest evidence available that a PIN really works on a
+ * reader. Command rows separately say whether the latest change is waiting on
+ * this server or was handed over without a result reported back.
  *
  * A payroll employee assigned to a clock who has no `employee_map` row cannot
  * be enrolled at all — either they never came down in the roster, or their PIN
@@ -39,17 +40,26 @@ use Illuminate\Support\Collection;
  */
 class DeviceRoster
 {
-    /** Sent to the clock (or queued for it) and still assigned. */
+    /** Recorded in ADMS's intended list and still assigned. */
     public const ON_CLOCK = 'on_clock';
 
-    /** Assigned in payroll, not sent to the clock yet. */
+    /** Assigned in payroll, but not recorded in ADMS's intended list yet. */
     public const ADDING = 'adding';
 
-    /** Sent to the clock before, no longer assigned — due to be removed. */
+    /** Recorded in ADMS's intended list, but no longer assigned. */
     public const REMOVING = 'removing';
 
     /** Assigned in payroll but not enrollable: no employee record, or a contested PIN. */
     public const BLOCKED = 'blocked';
+
+    /** Filter-only state: the reader has produced at least one punch for this PIN. */
+    public const WORKING = 'working';
+
+    /** Filter-only state: the latest active command has not left ADMS. */
+    public const WAITING = 'waiting';
+
+    /** Filter-only state: the latest active command was handed over without a result. */
+    public const UNCONFIRMED = 'unconfirmed';
 
     /** Problems first, then the routine rows; name breaks the tie. */
     private const STATUS_ORDER = [
@@ -142,7 +152,7 @@ class DeviceRoster
      * is the same order of magnitude EmployeeDirectory already assembles here.
      *
      * @param  array{search?:?string,status?:?string}  $filters
-     * @return array{people:LengthAwarePaginator,summary:array{total:int,on_clock:int,adding:int,removing:int,blocked:int,queued:int}}
+     * @return array{people:LengthAwarePaginator,summary:array{total:int,on_clock:int,adding:int,removing:int,blocked:int,working:int,waiting:int,unconfirmed:int}}
      */
     public static function forDevice(Device $device, array $filters = [], int $perPage = PerPage::DEFAULT): array
     {
@@ -154,7 +164,9 @@ class DeviceRoster
             'adding' => $people->where('status', self::ADDING)->count(),
             'removing' => $people->where('status', self::REMOVING)->count(),
             'blocked' => $people->where('status', self::BLOCKED)->count(),
-            'queued' => $people->whereNotNull('queued')->count(),
+            'working' => $people->where('punch_count', '>', 0)->count(),
+            'waiting' => $people->filter(fn (array $row) => ($row['command']['delivery'] ?? null) === 'pending')->count(),
+            'unconfirmed' => $people->filter(fn (array $row) => ($row['command']['delivery'] ?? null) === 'sent')->count(),
         ];
 
         $filtered = self::filter($people, $filters);
@@ -191,7 +203,7 @@ class DeviceRoster
             ? collect()
             : EmployeeMap::whereIn('payroll_employee_id', $assignedIds)->get()->keyBy('device_pin');
 
-        $queued = self::queuedByPin($device->no_sn);
+        $commands = self::activeCommandByPin($device->no_sn);
         $punches = self::punchesByPin($device->no_sn);
 
         $rows = [];
@@ -261,8 +273,8 @@ class DeviceRoster
         }
 
         return collect($rows)
-            ->map(function (array $row) use ($queued, $punches) {
-                $row['queued'] = $row['pin'] !== null ? ($queued[$row['pin']] ?? null) : null;
+            ->map(function (array $row) use ($commands, $punches) {
+                $row['command'] = $row['pin'] !== null ? ($commands[$row['pin']] ?? null) : null;
                 $row['last_punch_at'] = $row['pin'] !== null ? ($punches[$row['pin']]['last_punch_at'] ?? null) : null;
                 $row['punch_count'] = $row['pin'] !== null ? (int) ($punches[$row['pin']]['punch_count'] ?? 0) : 0;
 
@@ -311,26 +323,30 @@ class DeviceRoster
      * this: a reader unplugged for a fortnight has an untouched queue and an
      * enrollment table that claims everything was sent.
      *
-     * @return array<string, string> pin => 'add'|'remove'
+     * @return array<string, array{action:string,delivery:string}>
      */
-    private static function queuedByPin(string $deviceSn): array
+    private static function activeCommandByPin(string $deviceSn): array
     {
-        $queued = [];
+        $commands = [];
 
         DeviceCommand::where('device_sn', $deviceSn)
             ->whereIn('status', ['pending', 'sent'])
             ->orderBy('id')
-            ->pluck('body')
-            ->each(function (?string $body) use (&$queued) {
+            ->get(['body', 'status'])
+            ->each(function (DeviceCommand $command) use (&$commands) {
+                $body = $command->body;
                 if (! preg_match('/PIN=([^\t\r\n]+)/', (string) $body, $m)) {
                     return;
                 }
                 // Last one wins: the queue is ordered, so an add followed by a
                 // remove for the same person ends as a remove.
-                $queued[trim($m[1])] = str_contains((string) $body, 'DELETE') ? 'remove' : 'add';
+                $commands[trim($m[1])] = [
+                    'action' => str_contains((string) $body, 'DELETE') ? 'remove' : 'add',
+                    'delivery' => $command->status,
+                ];
             });
 
-        return $queued;
+        return $commands;
     }
 
     /**
@@ -362,6 +378,12 @@ class DeviceRoster
         $status = $filters['status'] ?? null;
         if ($status !== null && $status !== '' && array_key_exists($status, self::STATUS_ORDER)) {
             $people = $people->where('status', $status);
+        } elseif ($status === self::WORKING) {
+            $people = $people->where('punch_count', '>', 0);
+        } elseif ($status === self::WAITING) {
+            $people = $people->filter(fn (array $row) => ($row['command']['delivery'] ?? null) === 'pending');
+        } elseif ($status === self::UNCONFIRMED) {
+            $people = $people->filter(fn (array $row) => ($row['command']['delivery'] ?? null) === 'sent');
         }
 
         $search = trim((string) ($filters['search'] ?? ''));
@@ -384,10 +406,10 @@ class DeviceRoster
     public static function label(string $status): array
     {
         return match ($status) {
-            self::ON_CLOCK => ['Recorded for clock', 'bg-success'],
-            self::ADDING => ['Waiting to be added', 'bg-info text-dark'],
-            self::REMOVING => ['Waiting to be removed', 'bg-warning text-dark'],
-            self::BLOCKED => ["Can't be added", 'bg-danger'],
+            self::ON_CLOCK => ['Recorded by ADMS', 'bg-secondary'],
+            self::ADDING => ['Not recorded by ADMS', 'bg-info text-dark'],
+            self::REMOVING => ['No longer assigned', 'bg-warning text-dark'],
+            self::BLOCKED => ["Can't be enrolled", 'bg-danger'],
             default => [$status, 'bg-secondary'],
         };
     }

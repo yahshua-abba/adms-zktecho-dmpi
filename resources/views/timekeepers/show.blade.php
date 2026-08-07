@@ -18,7 +18,7 @@
             <div class="d-flex flex-wrap gap-2">
                 @foreach ($readers as $reader)
                     <a href="{{ route('devices.people', $reader->id) }}" class="btn btn-outline-secondary">
-                        <i class="bi bi-hdd-network"></i> {{ $reader->nama ?: $reader->no_sn }}
+                        <i class="bi bi-hdd-network"></i> Open physical clock {{ $reader->nama ?: $reader->no_sn }}
                     </a>
                 @endforeach
             </div>
@@ -36,8 +36,10 @@
                 No clock here is linked to it, so nobody is being enrolled from this list at all.
                 Link one on the <a href="{{ route('devices.index') }}">Devices page</a> to start.
             @elseif ($readers->count() === 1)
-                To see who has actually been sent to the clock, open
-                <a href="{{ route('devices.people', $readers->first()->id) }}">{{ $readers->first()->nama ?: $readers->first()->no_sn }}</a>.
+                To inspect delivery and punch evidence, use
+                <a href="{{ route('devices.people', $readers->first()->id) }}" class="fw-semibold">
+                    Open physical clock {{ $readers->first()->nama ?: $readers->first()->no_sn }}
+                </a>.
             @else
                 {{ $readers->count() }} clocks are linked to it, and each has its own list of who has
                 actually been sent — open them above.
@@ -55,14 +57,14 @@
         </div>
         <div class="col-6 col-lg-4">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Could be added</div>
+                <div class="text-muted small">Eligible for enrollment</div>
                 <div class="fs-3 fw-semibold text-success">{{ number_format($summary['enrollable']) }}</div>
                 <div class="small text-muted">this server can enrol them</div>
             </div></div>
         </div>
         <div class="col-6 col-lg-4">
             <div class="card h-100"><div class="card-body">
-                <div class="text-muted small">Can't be added</div>
+                <div class="text-muted small">Can't be enrolled</div>
                 <div class="fs-3 fw-semibold {{ $summary['blocked'] ? 'text-danger' : '' }}">{{ number_format($summary['blocked']) }}</div>
                 <div class="small text-muted">no employee record, or a PIN conflict</div>
             </div></div>
@@ -98,8 +100,8 @@
                 <label class="form-label small mb-1">Status</label>
                 <select name="status" class="form-select" onchange="this.form.submit()">
                     <option value="">All</option>
-                    <option value="{{ \App\Queries\TimekeeperDirectory::ENROLLABLE }}" @selected($status === \App\Queries\TimekeeperDirectory::ENROLLABLE)>Can be added to a clock</option>
-                    <option value="{{ \App\Queries\TimekeeperDirectory::BLOCKED }}" @selected($status === \App\Queries\TimekeeperDirectory::BLOCKED)>Can't be added</option>
+                    <option value="{{ \App\Queries\TimekeeperDirectory::ENROLLABLE }}" @selected($status === \App\Queries\TimekeeperDirectory::ENROLLABLE)>Eligible for enrollment</option>
+                    <option value="{{ \App\Queries\TimekeeperDirectory::BLOCKED }}" @selected($status === \App\Queries\TimekeeperDirectory::BLOCKED)>Can't be enrolled</option>
                 </select>
             </div>
             <div class="col-auto">

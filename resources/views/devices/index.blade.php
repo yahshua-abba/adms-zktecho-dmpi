@@ -218,7 +218,7 @@
                                     @endforeach
                                 </select>
                             </td>
-                            {{-- Two numbers, never one. "Recorded for clock" is ADMS's
+                            {{-- Two numbers, never one. "ADMS roster" is ADMS's
                                  intended user list; "payroll assigns" is what DMPI says
                                  belongs there. The first is deliberately not called "on the
                                  clock": an unconfirmed command is not proof that the physical
@@ -227,7 +227,7 @@
                             <td>
                                 <a href="{{ route('devices.people', $d->id) }}" class="text-decoration-none" title="See ADMS's intended user list for this clock; unconfirmed commands may not have been applied">
                                     <span class="fs-6 fw-semibold">{{ $people['on_clock'] }}</span>
-                                    <span class="small">recorded for clock</span>
+                                    <span class="small">in ADMS roster</span>
                                 </a>
                                 <div class="small text-muted">
                                     @if ($people['linked'])

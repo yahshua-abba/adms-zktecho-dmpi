@@ -17,7 +17,7 @@ class DeviceRosterTest extends TestCase
 {
     use RefreshDatabase;
 
-    /** A device linked to payroll code C1, with one employee assigned and enrolled. */
+    /** A device linked to payroll code C1. */
     private function device(?string $code = 'C1'): Device
     {
         return Device::create(['no_sn' => 'DEV-1', 'nama' => 'Main Gate', 'payroll_device_code' => $code]);
@@ -40,7 +40,7 @@ class DeviceRosterTest extends TestCase
         $this->employee('5_2', 102, 'BRAVO, Ben');
         DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 101]);
         DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 102]);
-        // Only one of the two has actually been pushed to the clock.
+        // Only one of the two is in ADMS's intended list for the clock.
         DeviceEnrollment::create(['device_sn' => 'DEV-1', 'pin' => '5_1', 'name' => 'ALPHA, Ann']);
 
         $counts = DeviceRoster::counts(collect([$device]))['DEV-1'];
@@ -131,7 +131,16 @@ class DeviceRosterTest extends TestCase
         $this->assertSame(DeviceRoster::ON_CLOCK, $byPin['5_1']['status']);
         $this->assertSame(DeviceRoster::ADDING, $byPin['5_2']['status']);
         $this->assertSame(DeviceRoster::REMOVING, $byPin['5_9']['status']);
-        $this->assertSame(['total' => 3, 'on_clock' => 1, 'adding' => 1, 'removing' => 1, 'blocked' => 0, 'queued' => 0], $roster['summary']);
+        $this->assertSame([
+            'total' => 3,
+            'on_clock' => 1,
+            'adding' => 1,
+            'removing' => 1,
+            'blocked' => 0,
+            'working' => 0,
+            'waiting' => 0,
+            'unconfirmed' => 0,
+        ], $roster['summary']);
     }
 
     public function test_someone_due_for_removal_still_shows_their_roster_details(): void
@@ -211,7 +220,7 @@ class DeviceRosterTest extends TestCase
         $this->assertStringContainsString('PIN conflicts', $row['reason']);
     }
 
-    public function test_a_person_with_a_command_still_in_the_queue_is_marked_undelivered(): void
+    public function test_a_persons_latest_active_command_keeps_its_real_delivery_state(): void
     {
         $device = $this->device();
         $this->employee('5_1', 101, 'ALPHA, Ann');
@@ -220,13 +229,45 @@ class DeviceRosterTest extends TestCase
         DeviceCommand::create([
             'device_sn' => 'DEV-1',
             'body' => "DATA UPDATE USERINFO PIN=5_1\tName=ALPHA, Ann\tPri=0\tCard=",
+            'status' => 'sent',
+        ]);
+        DeviceCommand::create([
+            'device_sn' => 'DEV-1',
+            'body' => "DATA UPDATE USERINFO PIN=5_1\tName=ALPHA, Ann\tPri=0\tCard=",
             'status' => 'pending',
         ]);
 
         $roster = DeviceRoster::forDevice($device);
 
-        $this->assertSame('add', $roster['people']->items()[0]['queued']);
-        $this->assertSame(1, $roster['summary']['queued']);
+        $this->assertSame(
+            ['action' => 'add', 'delivery' => 'pending'],
+            $roster['people']->items()[0]['command'],
+        );
+        $this->assertSame(1, $roster['summary']['waiting']);
+        $this->assertSame(0, $roster['summary']['unconfirmed']);
+    }
+
+    public function test_a_sent_command_is_shown_as_unconfirmed_not_waiting(): void
+    {
+        $device = $this->device();
+        $this->employee('5_1', 101, 'ALPHA, Ann');
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 101]);
+        DeviceEnrollment::create(['device_sn' => 'DEV-1', 'pin' => '5_1', 'name' => 'ALPHA, Ann']);
+        DeviceCommand::create([
+            'device_sn' => 'DEV-1',
+            'body' => "DATA UPDATE USERINFO PIN=5_1\tName=ALPHA, Ann\tPri=0\tCard=",
+            'status' => 'sent',
+        ]);
+
+        $roster = DeviceRoster::forDevice($device);
+
+        $this->assertSame(
+            ['action' => 'add', 'delivery' => 'sent'],
+            $roster['people']->items()[0]['command'],
+        );
+        $this->assertSame(0, $roster['summary']['waiting']);
+        $this->assertSame(1, $roster['summary']['unconfirmed']);
+        $this->assertSame(1, DeviceRoster::forDevice($device, ['status' => DeviceRoster::UNCONFIRMED])['people']->total());
     }
 
     public function test_breakdown_can_be_searched_and_filtered_by_status(): void
@@ -237,6 +278,12 @@ class DeviceRosterTest extends TestCase
         DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 101]);
         DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 102]);
         DeviceEnrollment::create(['device_sn' => 'DEV-1', 'pin' => '5_1', 'name' => 'ALPHA, Ann']);
+        Attendance::create(['sn' => 'DEV-1', 'table' => 'ATTLOG', 'stamp' => '1', 'employee_id' => '5_1', 'timestamp' => '2026-08-01 08:00:00', 'is_sync' => false]);
+        DeviceCommand::create([
+            'device_sn' => 'DEV-1',
+            'body' => "DATA UPDATE USERINFO PIN=5_2\tName=BRAVO, Ben\tPri=0\tCard=",
+            'status' => 'pending',
+        ]);
 
         $searched = DeviceRoster::forDevice($device, ['search' => 'bravo']);
         $this->assertSame(1, $searched['people']->total());
@@ -245,6 +292,12 @@ class DeviceRosterTest extends TestCase
         $filtered = DeviceRoster::forDevice($device, ['status' => DeviceRoster::ON_CLOCK]);
         $this->assertSame(1, $filtered['people']->total());
         $this->assertSame('5_1', $filtered['people']->items()[0]['pin']);
+
+        $working = DeviceRoster::forDevice($device, ['status' => DeviceRoster::WORKING]);
+        $this->assertSame('5_1', $working['people']->items()[0]['pin']);
+
+        $waiting = DeviceRoster::forDevice($device, ['status' => DeviceRoster::WAITING]);
+        $this->assertSame('5_2', $waiting['people']->items()[0]['pin']);
 
         // The summary describes the whole device, not the filtered page.
         $this->assertSame(2, $filtered['summary']['total']);
@@ -264,6 +317,9 @@ class DeviceRosterTest extends TestCase
 
         $this->assertSame(2, $row['punch_count']);
         $this->assertStringContainsString('2026-08-02', (string) $row['last_punch_at']);
+
+        $summary = DeviceRoster::forDevice($device)['summary'];
+        $this->assertSame(1, $summary['working']);
     }
 
     public function test_devices_page_shows_a_people_count_per_device(): void
@@ -277,7 +333,7 @@ class DeviceRosterTest extends TestCase
         $response = $this->get('/devices');
 
         $response->assertOk();
-        $response->assertSee('recorded for clock');
+        $response->assertSee('in ADMS roster');
         $response->assertSee('payroll assigns 2');
         $response->assertSee("1 can't be added", false);
     }
@@ -294,12 +350,39 @@ class DeviceRosterTest extends TestCase
         $response = $this->get("/devices/{$device->id}/people");
 
         $response->assertOk();
-        $response->assertSee('People recorded for Main Gate');
+        $response->assertSee('Enrollment status for Main Gate');
         $response->assertSee('ALPHA, Ann');
         $response->assertSee('BRAVO, Ben');
         $response->assertSee('1996052557');       // RFID
-        $response->assertSee('Recorded for clock');
-        $response->assertSee('Waiting to be added');
+        $response->assertSee('ADMS intended list');
+        $response->assertSee('Punches received');
+        $response->assertSee('Waiting for clock');
+        $response->assertSee('Sent — unconfirmed');
+    }
+
+    public function test_device_people_page_shows_punch_evidence_and_an_obvious_queue_link(): void
+    {
+        $device = $this->device();
+        $this->employee('5_1', 101, 'ALPHA, Ann');
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 101]);
+        DeviceEnrollment::create(['device_sn' => 'DEV-1', 'pin' => '5_1', 'name' => 'ALPHA, Ann']);
+        Attendance::create([
+            'sn' => 'DEV-1', 'table' => 'ATTLOG', 'stamp' => '1', 'employee_id' => '5_1',
+            'timestamp' => '2026-08-02 08:00:00', 'is_sync' => false,
+        ]);
+        DeviceCommand::create([
+            'device_sn' => 'DEV-1',
+            'body' => "DATA UPDATE USERINFO PIN=5_1\tName=ALPHA, Ann\tPri=0\tCard=",
+            'status' => 'pending',
+        ]);
+
+        $response = $this->get("/devices/{$device->id}/people");
+
+        $response->assertOk();
+        $response->assertSee('Punch received here');
+        $response->assertSee('add/update waiting for clock');
+        $response->assertSee('Open queue');
+        $response->assertSee(route('devices.queue', $device));
     }
 
     public function test_device_people_page_requires_login(): void

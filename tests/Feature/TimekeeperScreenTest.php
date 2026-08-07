@@ -47,7 +47,9 @@ class TimekeeperScreenTest extends TestCase
         $this->get(route('devices.timekeepers.show', ['code' => 'GOWNING 1']))
             ->assertOk()
             ->assertSee('Rubelyn')
-            ->assertSee('5_4968');
+            ->assertSee('5_4968')
+            ->assertSee('Eligible for enrollment')
+            ->assertSee('Open physical clock Gowning-1');
     }
 
     /**
