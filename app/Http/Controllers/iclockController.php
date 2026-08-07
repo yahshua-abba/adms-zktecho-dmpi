@@ -135,29 +135,44 @@ public function handshake(Request $request)
                 $log['data'] = $request->getContent();
                 DB::table('finger_log')->insert($log);
     }
-    // Device polls here for queued commands; we hand back pending ones as
-    // "C:<id>:<body>" lines and mark them sent.
+    // Device polls here for queued commands; we hand back a small batch as
+    // "C:<id>:<body>" lines and mark only that batch sent. A full enrollment
+    // can contain thousands of users, which is too large to safely put in one
+    // response even though the protocol supports multiple command lines.
     public function getrequest(Request $request)
     {
         $sn = $request->input('SN');
         $this->touchOnline($sn); // polling for commands is a live contact too
 
-        $commands = DeviceCommand::where('device_sn', $sn)
-            ->where('status', 'pending')
-            ->orderBy('id')
-            ->get();
+        $batchSize = max(1, (int) config('adms.device_command_batch_size', 50));
+        $commands = DB::transaction(function () use ($sn, $batchSize) {
+            // Lock this slice until it is marked sent. Otherwise two device
+            // polls arriving together could receive the same commands.
+            $commands = DeviceCommand::where('device_sn', $sn)
+                ->where('status', 'pending')
+                ->orderBy('id')
+                ->limit($batchSize)
+                ->lockForUpdate()
+                ->get();
+
+            if ($commands->isNotEmpty()) {
+                DeviceCommand::whereIn('id', $commands->pluck('id'))
+                    ->where('status', 'pending')
+                    ->update(['status' => 'sent', 'sent_at' => now()]);
+            }
+
+            return $commands;
+        });
 
         if ($commands->isEmpty()) {
             return "OK";
         }
 
-        $lines = [];
-        foreach ($commands as $command) {
-            $lines[] = "C:{$command->id}:{$command->body}";
-            $command->update(['status' => 'sent', 'sent_at' => now()]);
-        }
+        $body = $commands
+            ->map(fn (DeviceCommand $command) => "C:{$command->id}:{$command->body}")
+            ->implode("\n")."\n";
 
-        return implode("\n", $lines);
+        return response($body, 200)->header('Content-Type', 'text/plain');
     }
 
     // Device reports command results here: "ID=<id>&Return=<code>&CMD=<cmd>"

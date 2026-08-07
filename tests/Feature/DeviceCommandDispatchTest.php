@@ -29,6 +29,24 @@ class DeviceCommandDispatchTest extends TestCase
         $this->assertSame('pending', DeviceCommand::where('device_sn', 'OTHER')->first()->status);
     }
 
+    public function test_getrequest_hands_over_only_the_configured_batch(): void
+    {
+        config(['adms.device_command_batch_size' => 2]);
+
+        $first = DeviceCommand::create(['device_sn' => 'DEV1', 'body' => 'FIRST', 'status' => 'pending']);
+        $second = DeviceCommand::create(['device_sn' => 'DEV1', 'body' => 'SECOND', 'status' => 'pending']);
+        $third = DeviceCommand::create(['device_sn' => 'DEV1', 'body' => 'THIRD', 'status' => 'pending']);
+
+        $response = $this->get('/iclock/getrequest?SN=DEV1');
+
+        $response->assertOk();
+        $this->assertSame("C:{$first->id}:FIRST\nC:{$second->id}:SECOND\n", $response->getContent());
+        $this->assertSame('text/plain; charset=UTF-8', $response->headers->get('Content-Type'));
+        $this->assertSame('sent', $first->fresh()->status);
+        $this->assertSame('sent', $second->fresh()->status);
+        $this->assertSame('pending', $third->fresh()->status);
+    }
+
     public function test_devicecmd_marks_command_done_on_success(): void
     {
         $cmd = DeviceCommand::create(['device_sn' => 'DEV1', 'body' => 'X', 'status' => 'sent']);

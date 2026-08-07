@@ -2,6 +2,14 @@
 
 return [
     /*
+    | Maximum commands returned to a clock in one /iclock/getrequest poll.
+    | Large roster refreshes can contain thousands of USERINFO rows; keeping the
+    | response small prevents a clock from accepting only the front of the body
+    | while the server incorrectly marks the entire roster as handed over.
+    */
+    'device_command_batch_size' => (int) env('ADMS_DEVICE_COMMAND_BATCH_SIZE', 50),
+
+    /*
     | How many days of routine log rows to keep before the logs:prune command
     | deletes them — the raw device_log / finger_log, the DMPI call log, download
     | and scheduled-job runs, finished device commands, and the info-level lines

@@ -384,7 +384,7 @@ class DeviceRoster
     public static function label(string $status): array
     {
         return match ($status) {
-            self::ON_CLOCK => ['On the clock', 'bg-success'],
+            self::ON_CLOCK => ['Recorded for clock', 'bg-success'],
             self::ADDING => ['Waiting to be added', 'bg-info text-dark'],
             self::REMOVING => ['Waiting to be removed', 'bg-warning text-dark'],
             self::BLOCKED => ["Can't be added", 'bg-danger'],

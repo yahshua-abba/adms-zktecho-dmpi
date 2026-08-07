@@ -39,15 +39,22 @@ class EnrollmentReconciler
             ->each(fn ($sn) => $this->reconcileDevice($sn));
     }
 
-    public function reconcileDevice(string $deviceSn): void
+    /**
+     * @return int number of commands newly queued
+     */
+    public function reconcileDevice(string $deviceSn, bool $forceUpdates = false): int
     {
         $device = Device::where('no_sn', $deviceSn)->first();
         if ($device === null || $device->payroll_device_code === null) {
-            return; // not linked to a payroll device — nothing to enroll
+            return 0; // not linked to a payroll device — nothing to enroll
         }
 
         $desired = $this->desiredUsers($device->payroll_device_code);
         $current = DeviceEnrollment::where('device_sn', $deviceSn)->get()->keyBy('pin');
+        $pendingBodies = DeviceCommand::where('device_sn', $deviceSn)
+            ->where('status', 'pending')
+            ->pluck('body')
+            ->flip();
         $now = now();
 
         $commands = [];
@@ -56,8 +63,14 @@ class EnrollmentReconciler
         // Add or update.
         foreach ($desired as $pin => $user) {
             $existing = $current->get($pin);
-            if ($existing === null || $existing->name !== $user['name'] || $existing->card !== $user['card']) {
-                $commands[] = $this->commandRow($deviceSn, $this->updateCommand($user), $now);
+            $body = $this->updateCommand($user);
+            $changed = $existing === null || $existing->name !== $user['name'] || $existing->card !== $user['card'];
+
+            // Automatic reconciliation stays a cheap diff. The dashboard button
+            // uses forceUpdates so an operator can safely re-send users after a
+            // clock collected a command but never confirmed that it ran it.
+            if (($changed || $forceUpdates) && ! $pendingBodies->has($body)) {
+                $commands[] = $this->commandRow($deviceSn, $body, $now);
                 $enrollments[] = [
                     'device_sn' => $deviceSn,
                     'pin' => $pin,
@@ -66,6 +79,7 @@ class EnrollmentReconciler
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
+                $pendingBodies->put($body, true);
             }
         }
 
@@ -92,6 +106,8 @@ class EnrollmentReconciler
         foreach (array_chunk($commands, self::CHUNK) as $chunk) {
             DeviceCommand::insert($chunk);
         }
+
+        return count($commands);
     }
 
     /** @return Collection<string, array{pin:string,name:?string,card:?string}> */

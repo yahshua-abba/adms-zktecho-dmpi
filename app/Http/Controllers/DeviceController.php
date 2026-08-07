@@ -485,12 +485,15 @@ class DeviceController extends Controller
         ])['ids'];
     }
 
-    // Manually queue enrollment commands for one device (the "Sync enrollments" button).
+    // Manually refresh one device. Unlike the scheduled diff, the button re-sends
+    // every assigned user so it can repair a command the clock collected without
+    // ever confirming or applying.
     public function syncEnrollments(Device $device, EnrollmentReconciler $reconciler)
     {
-        $reconciler->reconcileDevice($device->no_sn);
+        $queued = $reconciler->reconcileDevice($device->no_sn, forceUpdates: true);
 
-        return redirect()->route('devices.index')->with('success', "Enrollment queued for {$device->no_sn}.");
+        return redirect()->route('devices.index')
+            ->with('success', "Queued {$queued} enrollment command(s) for {$device->no_sn}.");
     }
 
     /**
