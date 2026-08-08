@@ -42,6 +42,9 @@ class DeviceQueue
     /** Deletes a user from the device outright. */
     public const REMOVE = 'remove';
 
+    /** Asks the device to upload one user's actual stored record. */
+    public const VERIFY = 'verify';
+
     /** How many instructions sit in each state. */
     public static function counts(Device $device): array
     {
@@ -97,10 +100,18 @@ class DeviceQueue
 
                 return [$command->id => [
                     'status' => $command->status,
+                    'action' => self::action($command->body),
                     'label' => $label,
                     'badge_class' => $badgeClass,
+                    'response_summary' => self::responseSummary($command),
+                    'response_time' => self::responseTime($command),
                     'return_code' => $command->return_code,
                     'response' => $command->response,
+                    'verification_status' => $command->verification_status,
+                    'verification_payload' => $command->verification_payload,
+                    'verified_at' => $command->verified_at?->format('Y-m-d H:i:s'),
+                    'can_retry' => self::canRetry($command),
+                    'can_verify' => self::canVerify($command),
                     'sent_at' => $command->sent_at?->format('Y-m-d H:i:s'),
                     'done_at' => $command->done_at?->format('Y-m-d H:i:s'),
                 ]];
@@ -129,13 +140,14 @@ class DeviceQueue
         }
 
         // Filtering on the action means filtering on the command text, since that
-        // is where the verb lives. DELETE is the only one worth isolating; an
-        // operator on this screen is nearly always hunting removals.
+        // is where the push-protocol verb lives.
         $action = $filters['action'] ?? null;
         if ($action === self::REMOVE) {
-            $query->where('body', 'like', '%DELETE%');
+            $query->where('body', 'like', 'DATA DELETE USERINFO%');
         } elseif ($action === self::ADD) {
-            $query->where('body', 'not like', '%DELETE%');
+            $query->where('body', 'like', 'DATA UPDATE USERINFO%');
+        } elseif ($action === self::VERIFY) {
+            $query->where('body', 'like', 'DATA QUERY USERINFO%');
         }
 
         $commands = $query->orderByDesc('id')->paginate($perPage);
@@ -165,7 +177,65 @@ class DeviceQueue
     /** What an instruction does to the machine. */
     public static function action(?string $body): string
     {
+        if (str_starts_with((string) $body, 'DATA QUERY USERINFO')) {
+            return self::VERIFY;
+        }
+
         return str_contains((string) $body, 'DELETE') ? self::REMOVE : self::ADD;
+    }
+
+    /** What the reply means, including the second USERINFO upload for a query. */
+    public static function responseSummary(DeviceCommand $command): string
+    {
+        if (self::action($command->body) === self::ADD && $command->verification_status) {
+            return $command->verification_status === 'present'
+                ? 'Verified present on clock'
+                : 'Verified missing from clock';
+        }
+
+        if (self::action($command->body) === self::VERIFY) {
+            return match ($command->verification_status) {
+                'present' => 'Verified present on clock',
+                'absent' => 'Verified missing from clock',
+                default => match ($command->status) {
+                    self::DONE => 'Query accepted · waiting for user record',
+                    self::FAILED => 'Verification failed · code '.($command->return_code ?? 'unknown'),
+                    self::SENT => 'Waiting for clock reply',
+                    default => 'Verification not sent yet',
+                },
+            };
+        }
+
+        return match ($command->status) {
+            self::DONE => 'Success · code '.($command->return_code ?? 0),
+            self::FAILED => 'Failed · code '.($command->return_code ?? 'unknown'),
+            self::SENT => 'Waiting for device reply',
+            default => 'Not sent yet',
+        };
+    }
+
+    public static function responseTime(DeviceCommand $command): string
+    {
+        if ($command->verified_at) {
+            return 'Verified '.$command->verified_at->format('Y-m-d H:i:s');
+        }
+        if ($command->done_at) {
+            return 'Replied '.$command->done_at->format('Y-m-d H:i:s');
+        }
+
+        return $command->sent_at ? 'Sent '.$command->sent_at->format('Y-m-d H:i:s') : '';
+    }
+
+    public static function canRetry(DeviceCommand $command): bool
+    {
+        return str_starts_with($command->body, 'DATA UPDATE USERINFO PIN=')
+            && $command->verification_status !== 'present'
+            && ($command->status === self::SENT || $command->verification_status === 'absent');
+    }
+
+    public static function canVerify(DeviceCommand $command): bool
+    {
+        return self::canRetry($command);
     }
 
     /** Plain-language label + Bootstrap badge class for a state. */

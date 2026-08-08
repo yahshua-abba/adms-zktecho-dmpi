@@ -82,6 +82,8 @@ Route::middleware('auth.admin')->group(function () {
     // is a mailbox, not a setting. See App\Sync\CommandQueue.
     Route::get('devices/{device}/queue', [DeviceController::class, 'queue'])->name('devices.queue');
     Route::get('devices/{device}/queue/status', [DeviceController::class, 'queueStatus'])->name('devices.queue.status');
+    Route::post('devices/{device}/queue/{command}/retry', [DeviceController::class, 'retryQueueEnrollment'])->name('devices.queue.retry');
+    Route::post('devices/{device}/queue/{command}/verify', [DeviceController::class, 'verifyQueueEnrollment'])->name('devices.queue.verify');
     Route::post('devices/{device}/queue/cancel', [DeviceController::class, 'cancelQueue'])->name('devices.queue.cancel');
     Route::get('devices/{device}/logs', [DeviceController::class, 'DevicePunchLog'])->name('devices.PunchLog');
     Route::get('devices-log', [DeviceController::class, 'DeviceLog'])->name('devices.DeviceLog');

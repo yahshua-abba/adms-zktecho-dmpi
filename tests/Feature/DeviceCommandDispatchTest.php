@@ -84,4 +84,28 @@ class DeviceCommandDispatchTest extends TestCase
         $this->assertSame('sent', $cmd->fresh()->status);
         $this->assertNull($cmd->fresh()->response);
     }
+
+    public function test_query_return_minus_ten_confirms_the_pin_is_missing(): void
+    {
+        $source = DeviceCommand::create([
+            'device_sn' => 'DEV1',
+            'body' => 'DATA UPDATE USERINFO PIN=5_4968',
+            'status' => 'sent',
+        ]);
+        $cmd = DeviceCommand::create([
+            'device_sn' => 'DEV1',
+            'body' => 'DATA QUERY USERINFO PIN=5_4968',
+            'status' => 'sent',
+            'source_command_id' => $source->id,
+        ]);
+
+        $this->call('POST', '/iclock/devicecmd?SN=DEV1', [], [], [], ['CONTENT_TYPE' => 'text/plain'], "ID={$cmd->id}&Return=-10&CMD=DATA")
+            ->assertOk();
+
+        $this->assertSame('done', $cmd->fresh()->status);
+        $this->assertSame('absent', $cmd->fresh()->verification_status);
+        $this->assertNotNull($cmd->fresh()->verified_at);
+        $this->assertSame('failed', $source->fresh()->status);
+        $this->assertSame('absent', $source->fresh()->verification_status);
+    }
 }
