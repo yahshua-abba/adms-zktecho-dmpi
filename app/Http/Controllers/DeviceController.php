@@ -538,6 +538,105 @@ class DeviceController extends Controller
         ]);
     }
 
+    /** Re-send one add/update that the clock collected but never confirmed. */
+    public function retryQueueEnrollment(
+        Device $device,
+        DeviceCommand $command,
+        EnrollmentReconciler $reconciler,
+    ) {
+        $pin = $this->unconfirmedEnrollmentPin($device, $command);
+        if ($pin === null) {
+            return redirect()->route('devices.queue', $device->id)
+                ->with('error', 'Only an unconfirmed add or update for this clock can be retried.');
+        }
+
+        $employee = EmployeeMap::where('device_pin', $pin)->first();
+        if ($employee === null) {
+            return redirect()->route('devices.queue', $device->id)
+                ->with('error', "PIN {$pin} no longer has an employee record. Fix eligibility before retrying.");
+        }
+
+        $result = $reconciler->reconcilePerson($device->no_sn, $employee->payroll_employee_id);
+        if ($result === EnrollmentReconciler::PERSON_QUEUED) {
+            ActivityLog::record('device.enrollment-retried', "Retried enrollment for {$pin} on {$device->no_sn}.", 'warning', [
+                'device_id' => $device->id,
+                'device_sn' => $device->no_sn,
+                'pin' => $pin,
+                'original_command_id' => $command->id,
+            ]);
+
+            return redirect()->route('devices.queue', $device->id)
+                ->with('success', "Queued a fresh enrollment for {$pin}. Watch the new row for the clock's response.");
+        }
+
+        if ($result === EnrollmentReconciler::PERSON_ALREADY_WAITING) {
+            return redirect()->route('devices.queue', $device->id)
+                ->with('success', "A fresh enrollment for {$pin} is already waiting for this clock.");
+        }
+
+        return redirect()->route('devices.queue', $device->id)
+            ->with('error', "PIN {$pin} is no longer eligible or assigned to this clock. Fix eligibility before retrying.");
+    }
+
+    /** Ask the physical clock to upload the user record it actually stores. */
+    public function verifyQueueEnrollment(Device $device, DeviceCommand $command)
+    {
+        $pin = $this->unconfirmedEnrollmentPin($device, $command);
+        if ($pin === null) {
+            return redirect()->route('devices.queue', $device->id)
+                ->with('error', 'Only an unconfirmed add or update for this clock can be verified.');
+        }
+
+        $body = "DATA QUERY USERINFO PIN={$pin}";
+        $created = DB::transaction(function () use ($device, $command, $body) {
+            // Serialize double-clicks on one clock. History may contain older
+            // completed checks, but only one unresolved check should be open.
+            Device::whereKey($device->id)->lockForUpdate()->first();
+            $open = DeviceCommand::where('device_sn', $device->no_sn)
+                ->where('body', $body)
+                ->whereNull('verification_status')
+                ->whereIn('status', [DeviceQueue::PENDING, DeviceQueue::SENT])
+                ->exists();
+
+            if ($open) {
+                return false;
+            }
+
+            DeviceCommand::create([
+                'device_sn' => $device->no_sn,
+                'body' => $body,
+                'source_command_id' => $command->id,
+                'status' => DeviceQueue::PENDING,
+            ]);
+
+            return true;
+        });
+
+        if ($created) {
+            ActivityLog::record('device.enrollment-verification-queued', "Queued an on-clock verification for {$pin} on {$device->no_sn}.", 'info', [
+                'device_id' => $device->id,
+                'device_sn' => $device->no_sn,
+                'pin' => $pin,
+                'original_command_id' => $command->id,
+            ]);
+        }
+
+        return redirect()->route('devices.queue', $device->id)
+            ->with('success', $created
+                ? "Queued a verification for {$pin}. The result will appear as a new row."
+                : "A verification for {$pin} is already waiting for this clock.");
+    }
+
+    private function unconfirmedEnrollmentPin(Device $device, DeviceCommand $command): ?string
+    {
+        if ($command->device_sn !== $device->no_sn
+            || ! DeviceQueue::canRetry($command)) {
+            return null;
+        }
+
+        return DeviceQueue::pin($command->body);
+    }
+
     /**
      * Call back queued instructions — the whole pending queue, or picked rows.
      *

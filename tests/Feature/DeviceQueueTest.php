@@ -283,6 +283,8 @@ class DeviceQueueTest extends TestCase
             'status' => 'done',
             'return_code' => 0,
             'response' => 'ID=10&Return=0&CMD=DATA',
+            'verification_status' => 'present',
+            'verified_at' => now(),
             'sent_at' => now()->subSecond(),
             'done_at' => now(),
         ]);
@@ -303,6 +305,8 @@ class DeviceQueueTest extends TestCase
             ->assertJsonPath('progress.responded', 1)
             ->assertJsonPath("commands.{$done->id}.status", 'done')
             ->assertJsonPath("commands.{$done->id}.response", 'ID=10&Return=0&CMD=DATA')
+            ->assertJsonPath("commands.{$done->id}.response_summary", 'Verified present on clock')
+            ->assertJsonPath("commands.{$done->id}.can_retry", false)
             ->assertJsonMissingPath("commands.{$other->id}");
     }
 
@@ -311,6 +315,117 @@ class DeviceQueueTest extends TestCase
         $device = $this->device();
 
         $this->guest()->getJson(route('devices.queue.status', $device->id))->assertRedirect(route('login'));
+    }
+
+    public function test_retrying_an_unconfirmed_add_queues_a_fresh_enrollment(): void
+    {
+        $device = $this->device();
+        EmployeeMap::create([
+            'device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968',
+            'payroll_employee_id' => 48213, 'name' => 'Rubelyn', 'rfid' => '55:2D:E3:D3',
+        ]);
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 48213]);
+        $unconfirmed = $this->command("DATA UPDATE USERINFO PIN=5_4968\tName=Rubelyn\tPri=0\tCard=[552DE3D3]", 'sent');
+
+        $this->post(route('devices.queue.retry', [$device->id, $unconfirmed->id]))
+            ->assertRedirect(route('devices.queue', $device->id))
+            ->assertSessionHas('success');
+
+        $this->assertSame(1, DeviceCommand::where('status', 'sent')->count());
+        $this->assertSame(1, DeviceCommand::where('status', 'pending')->count());
+        $this->assertDatabaseHas('device_commands', [
+            'device_sn' => 'DEV1',
+            'status' => 'pending',
+            'body' => "DATA UPDATE USERINFO PIN=5_4968\tName=Rubelyn\tPri=0\tCard=[552DE3D3]",
+        ]);
+    }
+
+    public function test_a_pin_verified_as_missing_can_be_retried(): void
+    {
+        $device = $this->device();
+        EmployeeMap::create([
+            'device_pin' => '5_4968', 'company' => '5', 'chapa' => '4968',
+            'payroll_employee_id' => 48213, 'name' => 'Rubelyn', 'rfid' => '55:2D:E3:D3',
+        ]);
+        DeviceAssignment::create(['device_code' => 'C1', 'payroll_employee_id' => 48213]);
+        $missing = DeviceCommand::create([
+            'device_sn' => 'DEV1',
+            'body' => 'DATA UPDATE USERINFO PIN=5_4968',
+            'status' => 'failed',
+            'verification_status' => 'absent',
+            'verified_at' => now(),
+        ]);
+
+        $this->post(route('devices.queue.retry', [$device->id, $missing->id]))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('device_commands', [
+            'device_sn' => 'DEV1',
+            'status' => 'pending',
+            'body' => "DATA UPDATE USERINFO PIN=5_4968\tName=Rubelyn\tPri=0\tCard=[552DE3D3]",
+        ]);
+    }
+
+    public function test_an_unconfirmed_add_can_queue_one_pin_verification(): void
+    {
+        $device = $this->device();
+        $unconfirmed = $this->command('DATA UPDATE USERINFO PIN=5_4968', 'sent');
+
+        $this->post(route('devices.queue.verify', [$device->id, $unconfirmed->id]))
+            ->assertSessionHas('success');
+        $this->post(route('devices.queue.verify', [$device->id, $unconfirmed->id]))
+            ->assertSessionHas('success');
+
+        $this->assertSame(1, DeviceCommand::where('body', 'DATA QUERY USERINFO PIN=5_4968')->count());
+        $this->assertDatabaseHas('device_commands', [
+            'device_sn' => 'DEV1',
+            'body' => 'DATA QUERY USERINFO PIN=5_4968',
+            'status' => 'pending',
+            'source_command_id' => $unconfirmed->id,
+        ]);
+    }
+
+    public function test_retry_and_verify_reject_a_removal_or_another_clocks_command(): void
+    {
+        $device = $this->device();
+        $removal = $this->command('DATA DELETE USERINFO PIN=5_4968', 'sent');
+        $other = DeviceCommand::create([
+            'device_sn' => 'OTHER',
+            'body' => 'DATA UPDATE USERINFO PIN=5_4968',
+            'status' => 'sent',
+        ]);
+
+        $this->post(route('devices.queue.retry', [$device->id, $removal->id]))->assertSessionHas('error');
+        $this->post(route('devices.queue.verify', [$device->id, $other->id]))->assertSessionHas('error');
+
+        $this->assertSame(2, DeviceCommand::count());
+    }
+
+    public function test_unconfirmed_add_shows_retry_and_verify_actions(): void
+    {
+        $device = $this->device();
+        $unconfirmed = $this->command('DATA UPDATE USERINFO PIN=5_4968', 'sent');
+        $this->command('DATA DELETE USERINFO PIN=5_5000', 'sent');
+
+        $this->get(route('devices.queue', $device->id))
+            ->assertOk()
+            ->assertSee('Retry enrollment')
+            ->assertSee('Verify on clock')
+            ->assertSee(route('devices.queue.retry', [$device->id, $unconfirmed->id]), false)
+            ->assertSee(route('devices.queue.verify', [$device->id, $unconfirmed->id]), false);
+    }
+
+    public function test_retry_and_verify_require_login(): void
+    {
+        $device = $this->device();
+        $unconfirmed = $this->command('DATA UPDATE USERINFO PIN=5_4968', 'sent');
+
+        $this->guest()->post(route('devices.queue.retry', [$device->id, $unconfirmed->id]))
+            ->assertRedirect(route('login'));
+        $this->guest()->post(route('devices.queue.verify', [$device->id, $unconfirmed->id]))
+            ->assertRedirect(route('login'));
+
+        $this->assertSame(1, DeviceCommand::count());
     }
 
     public function test_queue_screen_requires_login(): void

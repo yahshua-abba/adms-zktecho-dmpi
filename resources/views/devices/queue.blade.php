@@ -167,6 +167,7 @@
                     <option value="">All</option>
                     <option value="{{ $Q::ADD }}" @selected($action === $Q::ADD)>Add or update a person</option>
                     <option value="{{ $Q::REMOVE }}" @selected($action === $Q::REMOVE)>Remove a person</option>
+                    <option value="{{ $Q::VERIFY }}" @selected($action === $Q::VERIFY)>Verify a person on the clock</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -218,6 +219,8 @@
                                 <td>
                                     @if ($c->action === $Q::REMOVE)
                                         <span class="badge bg-danger">Remove from clock</span>
+                                    @elseif ($c->action === $Q::VERIFY)
+                                        <span class="badge bg-secondary">Check on clock</span>
                                     @else
                                         <span class="badge bg-primary">Add or update</span>
                                     @endif
@@ -233,23 +236,35 @@
                                 </td>
                                 <td style="min-width: 13rem;">
                                     <div class="small fw-semibold" data-response-summary>
-                                        @if ($c->status === $Q::DONE)
-                                            Success · code {{ $c->return_code ?? 0 }}
-                                        @elseif ($c->status === $Q::FAILED)
-                                            Failed · code {{ $c->return_code ?? 'unknown' }}
-                                        @elseif ($c->status === $Q::SENT)
-                                            Waiting for device reply
-                                        @else
-                                            Not sent yet
-                                        @endif
+                                        {{ $Q::responseSummary($c) }}
                                     </div>
                                     <div class="small text-muted" data-response-time>
-                                        {{ $c->done_at ? 'Replied '.$c->done_at : ($c->sent_at ? 'Sent '.$c->sent_at : '') }}
+                                        {{ $Q::responseTime($c) }}
                                     </div>
                                     <details class="small mt-1 {{ $c->response ? '' : 'd-none' }}" data-response-details>
                                         <summary>Raw device reply</summary>
                                         <code class="text-break" data-response-raw>{{ $c->response }}</code>
                                     </details>
+                                    <details class="small mt-1 {{ $c->verification_payload ? '' : 'd-none' }}" data-verification-details>
+                                        <summary>Returned user record</summary>
+                                        <code class="text-break" data-verification-raw>{{ $c->verification_payload }}</code>
+                                    </details>
+                                    @if ($c->action === $Q::ADD)
+                                        <div class="d-flex flex-wrap gap-1 mt-2 {{ $Q::canRetry($c) ? '' : 'd-none' }}" data-unconfirmed-actions>
+                                            <button type="submit"
+                                                    class="btn btn-sm btn-outline-primary"
+                                                    formaction="{{ route('devices.queue.retry', [$device->id, $c->id]) }}"
+                                                    data-queue-action="retry">
+                                                <i class="bi bi-arrow-repeat"></i> Retry enrollment
+                                            </button>
+                                            <button type="submit"
+                                                    class="btn btn-sm btn-outline-secondary"
+                                                    formaction="{{ route('devices.queue.verify', [$device->id, $c->id]) }}"
+                                                    data-queue-action="verify">
+                                                <i class="bi bi-search"></i> Verify on clock
+                                            </button>
+                                        </div>
+                                    @endif
                                 </td>
                                 <td class="small text-muted">{{ $c->created_at }}</td>
                                 <td class="small text-muted" data-sent-at>{{ $c->sent_at ?: '—' }}</td>
@@ -302,6 +317,9 @@
             // Removals are the ones that cost something to get wrong, so the
             // confirmation counts them rather than talking about "items".
             document.getElementById('cancelPickedForm').addEventListener('submit', function (e) {
+                if (e.submitter && e.submitter.dataset.queueAction) {
+                    return;
+                }
                 var n = picks().filter(function (c) { return c.checked; }).length;
                 if (!confirm('Cancel ' + n + ' queued instruction(s)?\n\nThey are removed from this clock\'s mailbox and it will never see them.\nNothing already on the machine changes.')) {
                     e.preventDefault();
@@ -342,24 +360,22 @@
                 badge.textContent = command.label;
 
                 var summary = row.querySelector('[data-response-summary]');
-                if (command.status === 'done') {
-                    summary.textContent = 'Success · code ' + (command.return_code === null ? '0' : command.return_code);
-                } else if (command.status === 'failed') {
-                    summary.textContent = 'Failed · code ' + (command.return_code === null ? 'unknown' : command.return_code);
-                } else if (command.status === 'sent') {
-                    summary.textContent = 'Waiting for device reply';
-                } else {
-                    summary.textContent = 'Not sent yet';
-                }
-
-                row.querySelector('[data-response-time]').textContent = command.done_at
-                    ? 'Replied ' + command.done_at
-                    : (command.sent_at ? 'Sent ' + command.sent_at : '');
+                summary.textContent = command.response_summary;
+                row.querySelector('[data-response-time]').textContent = command.response_time;
                 row.querySelector('[data-sent-at]').textContent = command.sent_at || '—';
 
                 var details = row.querySelector('[data-response-details]');
                 details.classList.toggle('d-none', !command.response);
                 row.querySelector('[data-response-raw]').textContent = command.response || '';
+
+                var verificationDetails = row.querySelector('[data-verification-details]');
+                verificationDetails.classList.toggle('d-none', !command.verification_payload);
+                row.querySelector('[data-verification-raw]').textContent = command.verification_payload || '';
+
+                var unconfirmedActions = row.querySelector('[data-unconfirmed-actions]');
+                if (unconfirmedActions) {
+                    unconfirmedActions.classList.toggle('d-none', !command.can_retry && !command.can_verify);
+                }
 
                 if (command.status !== 'pending') {
                     var pickCell = row.querySelector('[data-pick-cell]');

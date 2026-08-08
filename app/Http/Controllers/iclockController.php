@@ -80,12 +80,7 @@ public function handshake(Request $request)
             $tot = 0;
             //operation log
             if($request->input('table') == "OPERLOG"){
-                // $tot = count($arr) - 1;
-                foreach ($arr as $rey) {
-                    if(isset($rey)){
-                        $tot++;
-                    }
-                }
+                $tot = $this->receiveOperationRecords($request->input('SN'), $request->getContent());
                 return "OK: ".$tot;
             }
             //attendance
@@ -179,6 +174,8 @@ public function handshake(Request $request)
     // (possibly several lines). Return=0 means success.
     public function devicecmd(Request $request)
     {
+        $this->touchOnline($request->input('SN'));
+
         foreach (preg_split('/\r\n|\r|\n/', trim($request->getContent())) as $line) {
             if (trim($line) === '') {
                 continue;
@@ -188,17 +185,101 @@ public function handshake(Request $request)
                 continue;
             }
             $return = $parts['Return'] ?? null;
-            DeviceCommand::where('id', $parts['ID'])
+            $command = DeviceCommand::where('id', $parts['ID'])
                 ->where('device_sn', $request->input('SN'))
-                ->update([
-                    'status' => ((int) $return === 0) ? 'done' : 'failed',
-                    'return_code' => is_null($return) ? null : (int) $return,
-                    'response' => trim($line),
-                    'done_at' => now(),
-                ]);
+                ->first();
+
+            if ($command === null) {
+                continue;
+            }
+
+            $isMissingUser = $this->isUserQuery($command) && (int) $return === -10;
+            $updates = [
+                'status' => ((int) $return === 0 || $isMissingUser) ? 'done' : 'failed',
+                'return_code' => is_null($return) ? null : (int) $return,
+                'response' => trim($line),
+                'done_at' => now(),
+            ];
+
+            // The PUSH protocol reserves -10 for "the PIN does not exist".
+            // That is a completed verification result, not just a generic error.
+            if ($isMissingUser) {
+                $updates['verification_status'] = 'absent';
+                $updates['verified_at'] = now();
+            }
+
+            $command->update($updates);
+
+            if ($isMissingUser) {
+                $this->resolveSourceEnrollment($command, 'absent', null);
+            }
         }
 
         return "OK";
+    }
+
+    /**
+     * USERINFO query results arrive as USER records in an OPERLOG upload, not
+     * in the command acknowledgement. Store the exact record as proof that the
+     * requested PIN exists on this particular clock.
+     */
+    private function receiveOperationRecords(?string $deviceSn, string $payload): int
+    {
+        $total = 0;
+
+        foreach (preg_split('/\r\n|\r|\n/', $payload) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            $total++;
+            if (! preg_match('/^USER\s+.*\bPIN=([^\t\r\n]+)/', $line, $match)) {
+                continue;
+            }
+
+            $pin = trim($match[1]);
+            $query = DeviceCommand::where('device_sn', $deviceSn)
+                ->where('body', "DATA QUERY USERINFO PIN={$pin}")
+                ->whereNull('verification_status')
+                ->whereIn('status', ['sent', 'done'])
+                ->latest('id')
+                ->first();
+
+            if ($query) {
+                $query->update([
+                    'status' => 'done',
+                    'verification_status' => 'present',
+                    'verification_payload' => $line,
+                    'verified_at' => now(),
+                ]);
+                $this->resolveSourceEnrollment($query, 'present', $line);
+            }
+        }
+
+        return $total;
+    }
+
+    private function isUserQuery(DeviceCommand $command): bool
+    {
+        return str_starts_with($command->body, 'DATA QUERY USERINFO PIN=');
+    }
+
+    private function resolveSourceEnrollment(DeviceCommand $query, string $verificationStatus, ?string $payload): void
+    {
+        if ($query->source_command_id === null) {
+            return;
+        }
+
+        DeviceCommand::where('id', $query->source_command_id)
+            ->where('device_sn', $query->device_sn)
+            ->where('body', 'like', 'DATA UPDATE USERINFO%')
+            ->update([
+                'status' => $verificationStatus === 'present' ? 'done' : 'failed',
+                'verification_status' => $verificationStatus,
+                'verification_payload' => $payload,
+                'verified_at' => now(),
+            ]);
     }
     // Mark a device as just-contacted (drives the Online/Offline status).
     private function touchOnline(?string $sn): void
